@@ -1,0 +1,17 @@
+# compiled C++ core
+build/
+
+# the encrypted vault + any generated data files
+*.db
+*.dat
+averages.dat
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# editor/OS noise
+.vscode/
+.DS_Store

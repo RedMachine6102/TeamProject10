@@ -1,0 +1,15 @@
+Semantic search — vaultmind/search.py. Currently a curated knowledge map (SEMANTIC_MAP) linking concepts to services, plus filler-word stripping and difflib fuzzy matching. It satisfies the design-doc test case ("google" → Gmail/G-Suite/Drive) but only for relationships that are hand-coded. It doesn't understand meaning — "video site" won't find YouTube unless the map says so. Use sentence-transformers
+
+AI password audit — vaultmind/audit.py + the C++ scorers. Entropy math, repetition detection, and age thresholds are rule-based formulas, not a learned model of password weakness.
+
+AI password suggestions — vaultmind/generator.py + vc_generate_password. Cryptographically random generation under policy constraints.
+
+Password strength estimator
+
+
+
+
+
+
+
+
