@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # VaultMind AI — Prototype Build (Phase 2, Group 10)
 
 Intelligent password management prototype
@@ -70,3 +71,9 @@ vaultmind/
 ## Backlog hooks (from Trello plan)
 
 Voice search can feed transcribed text straight into `SemanticSearch.search()`; phishing URL detection would slot into `storage.Entry.url` validation; gamification badges can key off `AuditReport.vault_score` history.
+=======
+# TeamProject10
+Project 10 Group Repo for CSCE 3444
+Team Lead - Murphy Jacob
+Other roles TBD
+>>>>>>> 407494ae41db4ea16d939e1c29e1b0e783260a07
