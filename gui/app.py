@@ -8,9 +8,12 @@ Breach Monitor.
 from __future__ import annotations
 
 import os
+import platform
+import subprocess
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
@@ -42,6 +45,77 @@ FONT_H1   = ("Segoe UI", 18, "bold")
 FONT_H2   = ("Segoe UI", 13, "bold")
 
 CATEGORIES = ["All", "Email", "Social", "Banking", "Work", "Gaming", "Other"]
+
+
+def _normalize_url(raw: str) -> str | None:
+    """Turn a stored URL/host into a launchable https URL, or None if unusable.
+
+    - trims whitespace
+    - adds the https:// scheme when none is present
+    - leaves an existing http:// or https:// scheme alone
+    - rejects values that aren't plausible web addresses (e.g. a bare site
+      name like "Chase Bank" with a space and no dot), so we never try to
+      open "https://Chase Bank"
+    """
+    if not raw:
+        return None
+    url = raw.strip()
+    if not url:
+        return None
+
+    # strip a leading scheme to inspect the host, then rebuild
+    scheme = ""
+    lower = url.lower()
+    if lower.startswith("https://"):
+        scheme, rest = "https://", url[len("https://"):]
+    elif lower.startswith("http://"):
+        scheme, rest = "http://", url[len("http://"):]
+    else:
+        rest = url
+
+    host_part = rest.split("/", 1)[0]        # everything before the first path /
+    host_only = host_part.split(":", 1)[0]   # drop any :port
+    # a real host has no spaces and contains a dot (domain.tld) or is localhost
+    if " " in host_part:
+        return None
+    if "." not in host_only and host_only.lower() != "localhost":
+        return None
+
+    return (scheme or "https://") + rest
+
+
+def _open_in_default_browser(url: str) -> bool:
+    """Open `url` in the OS default browser. Returns True on apparent success.
+
+    webbrowser.open is tried first (cross-platform), with OS-specific
+    fallbacks because it can silently no-op on Windows and under WSL where no
+    browser is registered.
+    """
+    # 1) standard library — uses the registered default on most systems
+    try:
+        if webbrowser.open(url, new=2):
+            return True
+    except Exception:
+        pass
+
+    system = platform.system()
+    try:
+        if system == "Windows":
+            os.startfile(url)                       # type: ignore[attr-defined]
+            return True
+        if system == "Darwin":
+            subprocess.Popen(["open", url])
+            return True
+        # Linux / WSL: xdg-open, or hand off to Windows' browser via wslview
+        for launcher in ("wslview", "xdg-open"):
+            try:
+                subprocess.Popen([launcher, url])
+                return True
+            except FileNotFoundError:
+                continue
+    except Exception:
+        pass
+    return False
 
 
 def strength_color(score: int) -> str:
@@ -526,17 +600,23 @@ class VaultMindApp(tk.Tk):
             copy_btn.config(text="✓ Copied (clears in 30s)")
 
         def do_open():
-            url = entry.url.strip()
-            if not url:
-                messagebox.showinfo("No URL",
-                                    "This entry has no URL saved. Open the site "
-                                    "manually, change the password, then confirm.",
-                                    parent=win)
-            else:
-                if not url.startswith(("http://", "https://")):
-                    url = "https://" + url
-                import webbrowser
-                webbrowser.open(url)
+            raw = entry.url.strip()
+            url = _normalize_url(raw)
+            if url is None:
+                messagebox.showinfo(
+                    "No usable URL",
+                    "This entry has no valid website URL saved.\n\n"
+                    "Open the site manually in your browser, change the "
+                    "password there, then come back and confirm.",
+                    parent=win)
+                step["opened"] = True
+                return
+            if not _open_in_default_browser(url):
+                messagebox.showwarning(
+                    "Couldn't open browser",
+                    f"VaultMind couldn't launch your default browser.\n\n"
+                    f"Please open this address manually:\n{url}",
+                    parent=win)
             step["opened"] = True
 
         def do_confirm():

@@ -265,3 +265,35 @@ def test_breach_offline_degrades_gracefully():
                     side_effect=urllib.error.URLError("offline")):
         res = breach.check_password("anything")
     assert res.error is not None and not res.breached
+
+
+# ---- guided-upgrade URL handling (new issue fix) ----------------------------
+def _load_normalize_url():
+    """Load _normalize_url from the GUI module without importing tkinter."""
+    import os as _os
+    path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                         "..", "gui", "app.py")
+    src = open(path).read()
+    start = src.index("def _normalize_url")
+    end = src.index("def _open_in_default_browser")
+    ns: dict = {}
+    exec(src[start:end], ns)
+    return ns["_normalize_url"]
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("gmail.com", "https://gmail.com"),
+    ("drive.google.com", "https://drive.google.com"),
+    ("  chase.com  ", "https://chase.com"),
+    ("https://www.netflix.com/browse", "https://www.netflix.com/browse"),
+    ("http://localhost:8080", "http://localhost:8080"),
+    ("steampowered.com/login", "https://steampowered.com/login"),
+    ("www.reddit.com", "https://www.reddit.com"),
+])
+def test_url_normalization_valid(raw, expected):
+    assert _load_normalize_url()(raw) == expected
+
+
+@pytest.mark.parametrize("raw", ["Chase Bank", "notaurl", "", "   "])
+def test_url_normalization_rejects_non_urls(raw):
+    assert _load_normalize_url()(raw) is None

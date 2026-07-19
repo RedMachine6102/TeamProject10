@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.1 — Guided-upgrade browser fix
+
+- **Fixed: guided password upgrade didn't reliably open the website.**
+  The old code prepended `https://` and called `webbrowser.open`, which
+  could silently no-op on Windows/WSL and would happily build a broken URL
+  from a bare site name. Replaced with:
+  - `_normalize_url` — trims whitespace, adds `https://` only when no scheme
+    is present, preserves existing schemes and paths, and rejects values that
+    aren't real web addresses (e.g. "Chase Bank") instead of opening a
+    malformed URL.
+  - `_open_in_default_browser` — uses the OS default browser with reliable
+    per-platform fallbacks (`os.startfile` on Windows, `open` on macOS,
+    `wslview`/`xdg-open` on Linux/WSL), and reports failure to the user with
+    the address to open manually.
+  - 11 new regression tests covering valid and rejected URL inputs.
+
 ## 1.0.0 — Production build (Sprint 1 defect resolution)
 
 Addresses every defect and high/medium risk from the Group 10 test plan
