@@ -73,9 +73,22 @@ class AuthManager:
         return Session(key)
 
     # ---- PIN quick unlock (stand-in for biometric re-auth) -------------------
+    #
+    # KNOWN LIMITATION (test-plan Risk 4): the PIN wraps a copy of the vault
+    # key, so anyone who copies vault.db can brute-force a 4-6 digit PIN
+    # offline (at most 1,000,000 guesses). The high iteration count below slows
+    # each guess but does NOT make this safe against a determined attacker.
+    #
+    # Production fix: bind quick-unlock to an OS-protected secret store
+    # (Windows Hello / DPAPI, macOS Keychain / Secure Enclave, libsecret on
+    # Linux) so the wrapped key can't be attacked by copying the file alone.
+    # Until then, the master password remains the real security boundary and
+    # the PIN is a convenience for an already-unlocked device.
+    PIN_ITERATIONS = 600_000
+
     def _set_pin(self, pin: str, vault_key: bytes) -> None:
         pin_salt = corelib.random_bytes(16)
-        pin_key = corelib.derive_key(pin, pin_salt, iterations=200_000)
+        pin_key = corelib.derive_key(pin, pin_salt, iterations=self.PIN_ITERATIONS)
         self.store.set_meta("pin_salt", pin_salt)
         self.store.set_meta("pin_wrapped_key", corelib.encrypt(pin_key, vault_key))
 
@@ -84,7 +97,7 @@ class AuthManager:
         wrapped = self.store.get_meta("pin_wrapped_key")
         if pin_salt is None or wrapped is None:
             return None
-        pin_key = corelib.derive_key(pin, pin_salt, iterations=200_000)
+        pin_key = corelib.derive_key(pin, pin_salt, iterations=self.PIN_ITERATIONS)
         vault_key = corelib.decrypt(pin_key, wrapped)
         if vault_key is None or len(vault_key) != 32:
             return None

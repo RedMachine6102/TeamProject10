@@ -28,14 +28,21 @@ class Entry:
     notes: str = ""
     created: float = field(default_factory=time.time)
     modified: float = field(default_factory=time.time)
+    history: list = field(default_factory=list)  # prior passwords, for rollback
 
     def age_days(self) -> int:
         return int((time.time() - self.modified) / 86400)
+
+    def push_history(self, old_password: str, limit: int = 5) -> None:
+        """Record the previous password so a change can be rolled back (D-001)."""
+        self.history.insert(0, {"password": old_password, "at": time.time()})
+        del self.history[limit:]
 
 
 class VaultStorage:
     def __init__(self, db_path: str = DB_PATH):
         self.db_path = os.path.abspath(db_path)
+        self.last_integrity_failures: list[int] = []
         self._conn = sqlite3.connect(self.db_path)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v BLOB)")
@@ -78,15 +85,27 @@ class VaultStorage:
         self._conn.commit()
 
     def all(self, key: bytes) -> list[Entry]:
+        """Return all decryptable entries.
+
+        Rows that fail AES-GCM authentication are NOT silently dropped
+        (D-002). They are collected and exposed via `last_integrity_failures`
+        so the caller can warn the user and offer recovery, rather than
+        hiding possible data loss or tampering.
+        """
         out: list[Entry] = []
+        self.last_integrity_failures = []
         for row_id, blob in self._conn.execute("SELECT id, blob FROM entries"):
             pt = corelib.decrypt(key, blob)
             if pt is None:
-                continue  # wrong key or corrupted row
+                self.last_integrity_failures.append(row_id)
+                continue
             d = json.loads(pt)
             d["id"] = row_id
             out.append(Entry(**d))
         return out
+
+    def has_integrity_failures(self) -> bool:
+        return bool(getattr(self, "last_integrity_failures", []))
 
     def close(self) -> None:
         self._conn.close()

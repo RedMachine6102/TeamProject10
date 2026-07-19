@@ -1,4 +1,9 @@
 """VaultMind AI — Tkinter prototype GUI.
+
+Styled after the Phase-2 mockups: soft pink-white surface, rose accents,
+card-based lists. Screens: Login / Setup / PIN lock, Vault (semantic
+search), Entry editor, AI Generator, Security Dashboard (audit),
+Breach Monitor.
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from vaultmind.audit import run_audit              # noqa: E402
 from vaultmind.generator import PasswordPolicy, generate, analyze  # noqa: E402
 from vaultmind import breach                       # noqa: E402
 
-# ---- palette (pink & white) -------------------------------------
+# ---- palette (pink & white, per mockups) -------------------------------------
 BG       = "#fdf2f6"   # app background — soft pink-white
 CARD     = "#ffffff"   # card surface — white
 CARD_HI  = "#fce4ee"   # input / hovered surface — light pink
@@ -61,7 +66,7 @@ class VaultMindApp(tk.Tk):
         self.show_login()
         self.after(1000, self._tick)
 
-    # session watchdog 
+    # ---- session watchdog ----------------------------------------------------
     def _tick(self):
         if self.session and self.session.expired:
             self.session.destroy()
@@ -71,7 +76,7 @@ class VaultMindApp(tk.Tk):
             self.show_lock()
         self.after(1000, self._tick)
 
-    # screen saver
+    # ---- screen plumbing -------------------------------------------------------
     def _swap(self) -> tk.Frame:
         if self._screen is not None:
             self._screen.destroy()
@@ -125,8 +130,9 @@ class VaultMindApp(tk.Tk):
             except tk.TclError:
                 pass
 
+    # =========================================================================
     # LOGIN / SETUP / PIN LOCK
-
+    # =========================================================================
     def show_login(self):
         f = self._swap()
         tk.Label(f, text="🛡", bg=BG, fg=ACCENT, font=("Segoe UI", 44)).pack(pady=(70, 4))
@@ -193,7 +199,19 @@ class VaultMindApp(tk.Tk):
                   primary=False).pack(padx=120, fill="x")
         pin.focus_set()
 
-    # VAULT HOMEPAGE  (semantic search + categories + list)
+    # =========================================================================
+    # VAULT HOME  (semantic search + categories + list)
+    # =========================================================================
+    def _warn_integrity_failures(self):
+        """Surface any rows that failed GCM authentication (D-002)."""
+        if self.store.has_integrity_failures():
+            ids = self.store.last_integrity_failures
+            messagebox.showwarning(
+                "Integrity check failed",
+                f"{len(ids)} vault record(s) failed integrity validation and "
+                "could not be decrypted. This can mean data corruption or "
+                "tampering.\n\nThese entries are not shown. Restore from a "
+                "backup if you have one, or re-add the affected credentials.")
 
     def show_vault(self):
         f = self._swap()
@@ -234,6 +252,7 @@ class VaultMindApp(tk.Tk):
 
         q.bind("<KeyRelease>", lambda _e: self._render_list(q))
         self._render_list(q)
+        self._warn_integrity_failures()
 
     def _render_list(self, qwidget):
         for w in self._list.winfo_children():
@@ -272,8 +291,9 @@ class VaultMindApp(tk.Tk):
                       activebackground=CARD, activeforeground=ACCENT,
                       cursor="hand2", padx=10, pady=4).pack(side="right", padx=10)
 
+    # =========================================================================
     # ENTRY EDITOR
-
+    # =========================================================================
     def show_editor(self, entry: Entry | None):
         self._editing = entry
         f = self._swap()
@@ -339,9 +359,9 @@ class VaultMindApp(tk.Tk):
                       bd=0, relief="flat", font=FONT_SM, activebackground=BG,
                       activeforeground=BAD, cursor="hand2").pack(pady=10)
 
-
+    # =========================================================================
     # AI GENERATOR
-
+    # =========================================================================
     def show_generator(self):
         f = self._swap()
         self._header(f, "AI Password Generator", back=self.show_vault)
@@ -407,9 +427,9 @@ class VaultMindApp(tk.Tk):
         self._btn(f, "Copy to clipboard", copy, primary=False).pack(fill="x")
         gen()
 
-
+    # =========================================================================
     # SECURITY DASHBOARD  (audit engine)
-
+    # =========================================================================
     def show_dashboard(self):
         f = self._swap()
         self._header(f, "Security Dashboard", back=self.show_vault)
@@ -461,19 +481,100 @@ class VaultMindApp(tk.Tk):
                      font=FONT_SM, anchor="w").pack(fill="x", padx=12)
 
             def fix(finding=fd):
-                finding.entry.password = finding.suggestion
-                self.store.update(self.session.key, finding.entry)
-                messagebox.showinfo("Upgraded",
-                                    f"“{finding.entry.title}” now has a "
-                                    f"{corelib.strength_score(finding.entry.password)}/100 password.")
-                self.show_dashboard()
+                self._staged_replace(finding)
 
-            self._btn(card, "⚡ One-click stronger password", fix,
+            self._btn(card, "⚡ Upgrade password (guided)", fix,
                       primary=False).pack(fill="x", padx=12, pady=8)
 
+    # -------------------------------------------------------------------------
+    # Staged password upgrade (D-001).
+    # The old prototype overwrote the local vault immediately, which could put
+    # VaultMind out of sync with the real website and lock the user out. This
+    # flow copies the new password, sends the user to change it on the site
+    # FIRST, requires explicit confirmation, and only then saves — keeping the
+    # previous password in rollback history.
+    # -------------------------------------------------------------------------
+    def _staged_replace(self, finding):
+        entry = finding.entry
+        new_pw = finding.suggestion
+        win = tk.Toplevel(self)
+        win.title("Upgrade password")
+        win.configure(bg=BG)
+        win.geometry("420x430")
+        win.transient(self)
+        win.grab_set()
 
+        tk.Label(win, text=f"Upgrade — {entry.title}", bg=BG, fg=TEXT,
+                 font=FONT_H2).pack(pady=(16, 4))
+        tk.Label(win, text="Change the password on the website first,\n"
+                           "then confirm here. This prevents lockouts.",
+                 bg=BG, fg=MUTED, font=FONT_SM, justify="center").pack(pady=(0, 12))
+
+        box = tk.Frame(win, bg=CARD, highlightbackground="#f3cfdf",
+                       highlightthickness=1); box.pack(fill="x", padx=20)
+        tk.Label(box, text="New password", bg=CARD, fg=MUTED,
+                 font=FONT_SM).pack(anchor="w", padx=10, pady=(8, 0))
+        tk.Label(box, text=new_pw, bg=CARD, fg=ACCENT2,
+                 font=("Consolas", 12)).pack(anchor="w", padx=10, pady=(0, 8))
+
+        step = {"copied": False, "opened": False}
+
+        def do_copy():
+            self.clipboard_clear(); self.clipboard_append(new_pw)
+            self.after(30_000, self.clipboard_clear)
+            step["copied"] = True
+            copy_btn.config(text="✓ Copied (clears in 30s)")
+
+        def do_open():
+            url = entry.url.strip()
+            if not url:
+                messagebox.showinfo("No URL",
+                                    "This entry has no URL saved. Open the site "
+                                    "manually, change the password, then confirm.",
+                                    parent=win)
+            else:
+                if not url.startswith(("http://", "https://")):
+                    url = "https://" + url
+                import webbrowser
+                webbrowser.open(url)
+            step["opened"] = True
+
+        def do_confirm():
+            if not step["copied"]:
+                messagebox.showwarning("Copy first",
+                                       "Copy the new password before confirming.",
+                                       parent=win); return
+            if not messagebox.askyesno(
+                    "Confirm change",
+                    f"Have you already changed your password on "
+                    f"{entry.title} to the new one?\n\n"
+                    "Only confirm if the website change succeeded.",
+                    parent=win):
+                return
+            entry.push_history(entry.password)      # keep old pw for rollback
+            entry.password = new_pw
+            self.store.update(self.session.key, entry)
+            win.destroy()
+            messagebox.showinfo(
+                "Updated",
+                f"“{entry.title}” now stores a "
+                f"{corelib.strength_score(new_pw)}/100 password.\n"
+                "Previous password kept in history for rollback.")
+            self.show_dashboard()
+
+        copy_btn = self._btn(win, "1 · Copy new password", do_copy, primary=False)
+        copy_btn.pack(fill="x", padx=20, pady=(14, 6))
+        self._btn(win, "2 · Open website to change it", do_open,
+                  primary=False).pack(fill="x", padx=20, pady=6)
+        self._btn(win, "3 · I changed it — save to vault", do_confirm).pack(
+            fill="x", padx=20, pady=6)
+        tk.Button(win, text="Cancel", command=win.destroy, bg=BG, fg=MUTED,
+                  bd=0, relief="flat", font=FONT_SM, activebackground=BG,
+                  activeforeground=TEXT, cursor="hand2").pack(pady=8)
+
+    # =========================================================================
     # BREACH MONITOR  (HIBP k-anonymity)
-
+    # =========================================================================
     def show_breach(self):
         f = self._swap()
         self._header(f, "Breach Monitor", back=self.show_vault)
@@ -519,17 +620,17 @@ class VaultMindApp(tk.Tk):
 
         self._btn(f, "Run breach scan", scan).pack(fill="x", pady=(0, 8))
 
-
+    # =========================================================================
     # demo seed data (first run only) — makes audit/search demoable instantly
-
+    # =========================================================================
     def _seed_demo_data(self):
         demo = [
-            Entry(None, "Gmail", "johnsmith@gmail.com", "password123", "gmail.com", "Email"),
-            Entry(None, "Google Drive", "johnsmith@gmail.com", "password123", "drive.google.com", "Work"),
+            Entry(None, "Gmail", "murphy@gmail.com", "Sunshine123", "gmail.com", "Email"),
+            Entry(None, "Google Drive", "murphy@gmail.com", "Sunshine123", "drive.google.com", "Work"),
             Entry(None, "G-Suite Admin", "admin@team.com", "aaaa1111", "admin.google.com", "Work"),
-            Entry(None, "Steam", "john_smith", "P@ssw0rd!", "steampowered.com", "Gaming"),
-            Entry(None, "Chase Bank", "jsmith", "correct-horse-battery-staple-99!", "chase.com", "Banking"),
-            Entry(None, "Netflix", "johnsmith@gmail.com", "netflix2026", "netflix.com", "Other"),
+            Entry(None, "Steam", "murphy_gg", "P@ssw0rd!", "steampowered.com", "Gaming"),
+            Entry(None, "Chase Bank", "jmurphy", "correct-horse-battery-staple-99!", "chase.com", "Banking"),
+            Entry(None, "Netflix", "murphy@gmail.com", "netflix2021", "netflix.com", "Other"),
         ]
         # age one entry so the "old password" audit path is visible
         demo[5].created = demo[5].modified = demo[5].created - 400 * 86400

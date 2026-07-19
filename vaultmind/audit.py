@@ -66,12 +66,15 @@ def run_audit(entries: list[Entry],
         score = corelib.strength_score(e.password)
         ent = corelib.entropy_bits(e.password)
         rep = corelib.repetition_ratio(e.password)
+        common = corelib.common_penalty(e.password)
         age = e.age_days()
         issues: list[str] = []
 
         if score < WEAK_SCORE:
             issues.append("weak")
             weak += 1
+        if common >= 0.5:
+            issues.append("common password")
         if ent < LOW_ENTROPY_BITS:
             issues.append("low entropy")
         if rep > 0.30:

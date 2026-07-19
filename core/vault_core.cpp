@@ -1,6 +1,12 @@
-//Date:         07/01/2026
-//Authors:      Murphy Jacob, Gauri Kaushik, Shehtaz Mahboob, Colton Moore
-//Instructor:   Diane Rabah
+// ============================================================================
+// VaultMind Core  (libvaultcore)
+// C++ security engine: key derivation, authenticated encryption, password
+// analysis, CSPRNG generation, and SHA-1 hashing for k-anonymity queries.
+//
+// Exposed as a C ABI so Python can load it with ctypes.
+// Requires: OpenSSL (libcrypto)
+// Build:    see ../build.sh
+// ============================================================================
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -160,9 +166,50 @@ double vc_repetition_ratio(const char* password) {
     return (double)weak_pairs / (double)(n - 1);
 }
 
+// Common-password / predictable-pattern detection (Risk 3 from the test plan).
+// Pure charset-entropy overrates things like "password123" because the pool is
+// large. This scans for embedded dictionary words and common number patterns.
+// Returns a penalty in [0.0, 1.0]: 0.0 = clean, 1.0 = very common.
+static const char* COMMON_TOKENS[] = {
+    "password", "passwd", "qwerty", "asdf", "zxcv", "admin", "login",
+    "welcome", "letmein", "monkey", "dragon", "master", "shadow", "abc123",
+    "iloveyou", "sunshine", "princess", "football", "baseball", "superman",
+    "trustno1", "whatever", "starwars", "hello", "test", "guest", "root",
+    "111111", "123456", "12345678", "000000", "654321", "121212", "696969"
+};
+static const int COMMON_TOKENS_N = sizeof(COMMON_TOKENS) / sizeof(COMMON_TOKENS[0]);
+
+double vc_common_penalty(const char* password) {
+    if (!password || !*password) return 0.0;
+    std::string low(password);
+    for (char& c : low) c = (char)std::tolower((unsigned char)c);
+    size_t n = low.size();
+    double penalty = 0.0;
+
+    // 1) embedded common token (the "password" inside "password123")
+    for (int i = 0; i < COMMON_TOKENS_N; ++i) {
+        std::string tok = COMMON_TOKENS[i];
+        if (low.find(tok) != std::string::npos) {
+            double coverage = (double)tok.size() / (double)n;   // 0..1
+            double p_pen = 0.5 + 0.5 * coverage;                // 0.5..1.0
+            if (p_pen > penalty) penalty = p_pen;
+        }
+    }
+    // 2) word + trailing digit run ("...123", "...2024")
+    size_t trailing = 0;
+    for (size_t i = n; i-- > 0 && low[i] >= '0' && low[i] <= '9'; ) ++trailing;
+    if (trailing >= 3 && trailing >= n - trailing && penalty < 0.6) penalty = 0.6;
+    // 3) pure-digit password (a PIN typed as a password)
+    bool all_digit = n > 0;
+    for (char c : low) if (c < '0' || c > '9') { all_digit = false; break; }
+    if (all_digit && n <= 10 && penalty < 0.7) penalty = 0.7;
+
+    return penalty > 1.0 ? 1.0 : penalty;
+}
+
 // Composite strength score 0..100.
-// Blends charset entropy with penalties for repetition/sequences and for
-// very low character-class diversity.
+// Blends charset entropy with penalties for repetition/sequences, low
+// character-class diversity, and known common-password patterns (Risk 3).
 int vc_strength_score(const char* password) {
     if (!password || !*password) return 0;
     double bits = vc_entropy_bits(password);
@@ -171,6 +218,14 @@ int vc_strength_score(const char* password) {
 
     double rep = vc_repetition_ratio(password);      // 0..1
     base *= (1.0 - 0.6 * rep);                       // up to -60% penalty
+
+    // common-password penalty: caps and scales down predictable passwords
+    double common = vc_common_penalty(password);     // 0..1
+    if (common > 0.0) {
+        base *= (1.0 - 0.7 * common);                // up to -70%
+        double cap = 40.0 * (1.0 - common);          // strong match -> near 0
+        if (base > cap) base = cap;
+    }
 
     // diversity penalty: single character class caps the score
     size_t n = strlen(password);

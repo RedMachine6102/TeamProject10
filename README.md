@@ -1,9 +1,10 @@
-<<<<<<< HEAD
-# VaultMind AI — Prototype Build (Phase 2, Group 10)
+# VaultMind AI — Production Build (Group 10)
 
-Intelligent password management prototype
+> Sprint 1 defects D-001…D-004 and Risks 3–4 from the test plan are resolved.
+> See `CHANGELOG.md` for the defect-to-fix mapping.
 
-Authors: Murphy Jacob, Gauri Kaushik, Shehtaz Mahboob, Colton Moore
+
+Intelligent password management prototype implementing the Sprint 2 requirements from the design document. The application is a hybrid **C++ / Python** build:
 
 | Layer | Language | Why |
 |---|---|---|
@@ -44,10 +45,13 @@ On first run you'll create a master password + PIN, and the vault is seeded with
 ## Tests
 
 ```bash
-python3 tests/test_prototype.py
+pytest tests/test_vaultmind.py -v      # 33 independent cases, network mocked
+python3 tests/test_prototype.py        # legacy headless smoke suite (still passes)
 ```
 
-31 headless checks covering the crypto core (round-trip, tamper rejection, SHA-1 vector), analysis, policy generation, storage/auth/session, semantic + fuzzy search, and the audit engine. The live HIBP check is skipped automatically when offline.
+The pytest suite runs every check independently and reports all failures instead of stopping at the first (test plan §4.1). Breach-monitor network calls are mocked, so results don't depend on internet access. New regression tests cover the staged replacement rollback (D-001), integrity-failure reporting (D-002), and common-password downranking (Risk 3).
+
+**Windows:** run `build.ps1` from a shell where MSYS2's g++ and OpenSSL are on PATH — it compiles `build/vaultcore.dll` and copies the required runtime DLLs next to it. The loader now picks the right library per platform, so a Linux `.so` in the tree won't be loaded on Windows.
 
 ## Layout
 
@@ -71,9 +75,3 @@ vaultmind/
 ## Backlog hooks (from Trello plan)
 
 Voice search can feed transcribed text straight into `SemanticSearch.search()`; phishing URL detection would slot into `storage.Entry.url` validation; gamification badges can key off `AuditReport.vault_score` history.
-=======
-# TeamProject10
-Project 10 Group Repo for CSCE 3444
-Team Lead - Murphy Jacob
-Other roles TBD
->>>>>>> 407494ae41db4ea16d939e1c29e1b0e783260a07

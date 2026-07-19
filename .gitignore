@@ -1,0 +1,25 @@
+# ---- compiled native core (build per-platform; never commit binaries) D-003/D-004
+build/
+*.so
+*.dylib
+*.dll
+*.o
+*.obj
+
+# ---- vault + generated data (never commit real or demo databases)
+*.db
+*.dat
+
+# ---- python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+
+# ---- editor / OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

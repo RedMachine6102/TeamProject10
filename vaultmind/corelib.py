@@ -3,21 +3,41 @@ from __future__ import annotations
 
 import ctypes
 import os
+import platform
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_CANDIDATES = [
-    os.path.join(_HERE, "..", "build", "libvaultcore.so"),
-    os.path.join(_HERE, "..", "build", "libvaultcore.dylib"),
-    os.path.join(_HERE, "..", "build", "vaultcore.dll"),
-]
+_BUILD = os.path.join(_HERE, "..", "build")
+
+
+def _lib_filename() -> str:
+    """The correct shared-library name for the current OS (D-003)."""
+    system = platform.system()
+    if system == "Windows":
+        return "vaultcore.dll"
+    if system == "Darwin":
+        return "libvaultcore.dylib"
+    return "libvaultcore.so"
 
 
 def _load() -> ctypes.CDLL:
-    for path in _CANDIDATES:
-        if os.path.exists(path):
+    # Only ever attempt the library built for THIS platform, so a stray
+    # Linux .so on a Windows checkout can't be picked up (WinError 193).
+    name = _lib_filename()
+    path = os.path.join(_BUILD, name)
+    if os.path.exists(path):
+        try:
             return ctypes.CDLL(os.path.abspath(path))
-    sys.exit("libvaultcore not found — run ./build.sh first.")
+        except OSError as exc:
+            sys.exit(f"Failed to load {name}: {exc}\n"
+                     f"Rebuild it for {platform.system()} — see README build steps.")
+    sys.exit(
+        f"Native core '{name}' not found in build/.\n"
+        f"Build it for {platform.system()} first:\n"
+        f"  Linux/macOS:  ./build.sh\n"
+        f"  Windows:      compile core/vault_core.cpp to build/vaultcore.dll "
+        f"(see README)."
+    )
 
 
 _lib = _load()
@@ -49,6 +69,9 @@ _lib.vc_repetition_ratio.restype = ctypes.c_double
 
 _lib.vc_strength_score.argtypes = [ctypes.c_char_p]
 _lib.vc_strength_score.restype = ctypes.c_int
+
+_lib.vc_common_penalty.argtypes = [ctypes.c_char_p]
+_lib.vc_common_penalty.restype = ctypes.c_double
 
 _lib.vc_generate_password.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                       ctypes.c_int, ctypes.c_char_p,
@@ -110,6 +133,11 @@ def repetition_ratio(password: str) -> float:
 
 def strength_score(password: str) -> int:
     return _lib.vc_strength_score(password.encode("utf-8"))
+
+
+def common_penalty(password: str) -> float:
+    """0.0 = no common-password pattern found, 1.0 = matches a very common one."""
+    return _lib.vc_common_penalty(password.encode("utf-8"))
 
 
 def generate_password(length: int = 20, use_upper: bool = True,
