@@ -82,6 +82,14 @@ vault records inside the rotation process. DPAPI does not stop malware already
 running as the same user. TPM-backed non-exportable keys, signed binaries,
 integrity monitoring, and revocation-on-compromise remain launch requirements.
 
+Optional mailbox refresh tokens are also protected with DPAPI and used only by
+the local agent. Exact sender-domain and timestamp checks reduce accidental or
+malicious code selection, but email accounts, message bodies, local process
+memory, and the system clock remain attack surfaces. A same-user process can
+read a token or challenge code while the agent is running. The backend cannot
+use mailbox access to authorize a rotation because it never receives that
+access.
+
 Vault records use a random data key. The server stores that key only as an
 AES-GCM envelope protected by a passphrase-derived wrapping key, so database or
 backup disclosure does not reveal it. Passphrase changes replace the envelope

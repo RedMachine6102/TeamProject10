@@ -13,7 +13,7 @@ marketing claims.
 | 30/60/90-day scheduling | Working foundation | Policy, queue, lease, and transition tests |
 | Trusted-agent authorization | Working foundation | Device signatures, nonce replay rejection, scoped grants |
 | Email account linking | Working foundation | OAuth code + PKCE integration test, encrypted token storage, revocation |
-| Email verification challenges | Security design | Local-agent-only boundary documented; provider review and adapter implementation remain required |
+| Email verification challenges | Working foundation | Local-only OAuth storage, bounded mailbox reads, exact sender/time checks, ambiguity rejection, and provider challenge tests |
 | Email security monitoring | Working foundation | Bounded metadata requests, token refresh, sanitization and deduplication tests |
 | AI planning boundary | Working foundation | Sanitized-only input, strict schema, stateless request, no approval/execution fields |
 | Deployed backend | Working foundation | Hardened VM 101 services with persistent data and HTTPS ingress |
@@ -45,8 +45,9 @@ marketing claims.
    sequence against a controlled demonstration provider. Add global, provider,
    account, and device kill switches before enabling unattended jobs.
 6. Register Google and Microsoft OAuth applications, configure production
-   callback URLs, and validate the implemented refresh/metadata monitor against
-   controlled provider mailboxes and provider revocation.
+   callback URLs, add a reviewed native authorization flow, and validate both
+   metadata monitoring and local challenge retrieval against controlled
+   mailboxes and provider revocation.
 7. Replicate encrypted backups off-host with separate deletion credentials, then
    export health metrics and add alert delivery, dependency/container scanning, artifact signing, and
    documented incident response.

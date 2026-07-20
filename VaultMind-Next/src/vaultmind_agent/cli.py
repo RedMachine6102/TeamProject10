@@ -8,6 +8,7 @@ from uuid import uuid4
 from .adapters import HttpProviderAdapter, VerifiedRotationExecutor
 from .client import AgentApiClient, AgentApiError
 from .config import AgentConfig, AgentPaths
+from .email_challenge import LocalEmailCodeSource, LocalEmailCredentials
 from .identity import DeviceIdentity
 from .runner import TrustedAgentRunner
 
@@ -23,6 +24,20 @@ def _adapter_values(values: list[str]) -> tuple[list[str], dict[str, str]]:
         providers.append(provider)
         urls[provider] = url
     return providers, urls
+
+
+def _sender_domain_values(values: list[str]) -> dict[str, list[str]]:
+    domains: dict[str, list[str]] = {}
+    for value in values:
+        provider, separator, domain = value.partition("=")
+        provider = provider.strip().lower()
+        domain = domain.strip().lower()
+        if not separator or not provider or not domain:
+            raise ValueError(
+                "sender domain must use rotation-provider=mail.example"
+            )
+        domains.setdefault(provider, []).append(domain)
+    return domains
 
 
 def enroll(args: argparse.Namespace, paths: AgentPaths) -> int:
@@ -51,8 +66,13 @@ def run_once(paths: AgentPaths) -> int:
         HttpProviderAdapter(provider, url)
         for provider, url in config.adapter_urls.items()
     ]
+    code_source = None
+    if paths.email_credentials.exists():
+        credentials = LocalEmailCredentials.load(paths.email_credentials)
+        code_source = LocalEmailCodeSource(credentials)
     runner = TrustedAgentRunner(
-        config, client, VerifiedRotationExecutor(adapters), paths.pause_file
+        config, client, VerifiedRotationExecutor(adapters, code_source),
+        paths.pause_file,
     )
     passphrase = getpass.getpass("Vault passphrase: ")
     outcome = runner.run_once(passphrase)
@@ -64,6 +84,34 @@ def run_once(paths: AgentPaths) -> int:
         return 0
     print(f"Rotation failed safely: {outcome.error_code}.", file=sys.stderr)
     return 1
+
+
+def configure_email(args: argparse.Namespace, paths: AgentPaths) -> int:
+    credentials = LocalEmailCredentials(
+        provider=args.mail_provider,
+        client_id=args.client_id.strip(),
+        client_secret=getpass.getpass(
+            "OAuth client secret (leave blank for a public client): "
+        ),
+        refresh_token=getpass.getpass("OAuth refresh token: "),
+        sender_domains=_sender_domain_values(args.sender_domain),
+    )
+    credentials.save(paths.email_credentials)
+    print("Local email verification configured.")
+    return 0
+
+
+def email_status(paths: AgentPaths) -> int:
+    if not paths.email_credentials.exists():
+        print("Local email verification is not configured.")
+        return 0
+    credentials = LocalEmailCredentials.load(paths.email_credentials)
+    allowed = ", ".join(
+        f"{provider}={','.join(domains)}"
+        for provider, domains in credentials.sender_domains.items()
+    )
+    print(f"Local email provider={credentials.provider}; senders={allowed}")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,6 +129,17 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("pause")
     subparsers.add_parser("resume")
     subparsers.add_parser("status")
+    email_parser = subparsers.add_parser("email-configure")
+    email_parser.add_argument(
+        "--mail-provider", required=True, choices=["google", "microsoft"]
+    )
+    email_parser.add_argument("--client-id", required=True)
+    email_parser.add_argument(
+        "--sender-domain", action="append", required=True,
+        help="allowlist entry such as demo=accounts.example",
+    )
+    subparsers.add_parser("email-status")
+    subparsers.add_parser("email-disconnect")
     return parser
 
 
@@ -93,6 +152,14 @@ def main() -> int:
             return enroll(args, paths)
         if args.command == "run-once":
             return run_once(paths)
+        if args.command == "email-configure":
+            return configure_email(args, paths)
+        if args.command == "email-status":
+            return email_status(paths)
+        if args.command == "email-disconnect":
+            paths.email_credentials.unlink(missing_ok=True)
+            print("Local email verification disconnected.")
+            return 0
         if args.command == "pause":
             paths.directory.mkdir(parents=True, exist_ok=True)
             paths.pause_file.write_text("paused\n", encoding="utf-8")

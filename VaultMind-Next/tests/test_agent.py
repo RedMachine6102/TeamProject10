@@ -192,3 +192,33 @@ def test_demo_provider_changes_and_verifies_without_storing_plaintext():
     assert provider.post("/session/verify", json={
         "username": "owner@example.com", "password": "New-password-value-123!",
     }).json() == {"ok": True}
+
+
+def test_demo_provider_requires_and_completes_email_challenge():
+    provider = TestClient(create_demo_provider(
+        "owner@example.com", "old-password-value", "482951"
+    ))
+    request = {
+        "username": "owner@example.com",
+        "current_password": "old-password-value",
+        "new_password": "New-password-value-123!",
+    }
+    change = provider.post("/password/change", json=request).json()
+    assert change["ok"] is False
+    assert change["challenge_required"] is True
+    assert provider.post("/session/verify", json={
+        "username": "owner@example.com",
+        "password": "old-password-value",
+    }).json() == {"ok": True}
+
+    challenge = request | {"challenge_id": change["challenge_id"]}
+    assert provider.post(
+        "/password/challenge", json=challenge | {"code": "111111"}
+    ).json() == {"ok": False}
+    assert provider.post(
+        "/password/challenge", json=challenge | {"code": "482951"}
+    ).json() == {"ok": True}
+    assert provider.post("/session/verify", json={
+        "username": "owner@example.com",
+        "password": "New-password-value-123!",
+    }).json() == {"ok": True}

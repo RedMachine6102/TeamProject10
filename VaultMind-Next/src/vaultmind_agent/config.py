@@ -82,3 +82,7 @@ class AgentPaths:
     @property
     def pause_file(self) -> Path:
         return self.directory / "PAUSED"
+
+    @property
+    def email_credentials(self) -> Path:
+        return self.directory / "email-credentials.dat"

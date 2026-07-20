@@ -25,7 +25,7 @@ def _input_blob(data: bytes) -> tuple[_DataBlob, ctypes.Array]:
     return _DataBlob(len(data), pointer), buffer
 
 
-def _windows_protect(data: bytes) -> bytes:
+def protect_for_current_user(data: bytes) -> bytes:
     if os.name != "nt":
         raise RuntimeError("agent device keys currently require Windows DPAPI")
     source, source_buffer = _input_blob(data)
@@ -43,7 +43,7 @@ def _windows_protect(data: bytes) -> bytes:
         del source_buffer
 
 
-def _windows_unprotect(data: bytes) -> bytes:
+def unprotect_for_current_user(data: bytes) -> bytes:
     if os.name != "nt":
         raise RuntimeError("agent device keys currently require Windows DPAPI")
     source, source_buffer = _input_blob(data)
@@ -93,7 +93,7 @@ class DeviceIdentity:
         }
 
     def save(self, path: Path) -> None:
-        protected = _windows_protect(self.private_key.private_bytes_raw())
+        protected = protect_for_current_user(self.private_key.private_bytes_raw())
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".tmp")
         temporary.write_bytes(protected)
@@ -102,7 +102,7 @@ class DeviceIdentity:
 
     @classmethod
     def load(cls, agent_id: str, path: Path) -> "DeviceIdentity":
-        raw = _windows_unprotect(path.read_bytes())
+        raw = unprotect_for_current_user(path.read_bytes())
         if len(raw) != 32:
             raise ValueError("stored agent device key is invalid")
         return cls(agent_id, Ed25519PrivateKey.from_private_bytes(raw))
