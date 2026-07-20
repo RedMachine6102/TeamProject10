@@ -120,6 +120,20 @@ def test_native_oauth_receives_loopback_code_and_returns_credentials(provider):
     assert "authorization-code-value" not in browser.response_body
 
 
+def test_native_oauth_can_connect_before_sender_allowlist_is_known():
+    client = FakeMailboxClient()
+    browser = CallbackBrowser()
+    credentials = NativeMailboxOAuth(client, browser).connect(
+        provider="google",
+        client_id="client-id-value-12345",
+        client_secret="",
+        sender_domains={},
+        timeout_seconds=30,
+    )
+    browser.thread.join(timeout=5)
+    assert credentials.sender_domains == {}
+
+
 @pytest.mark.parametrize("provider", ["google", "microsoft"])
 def test_authorization_code_exchange_sends_verifier_without_logging(provider):
     client = RecordingMailboxClient()

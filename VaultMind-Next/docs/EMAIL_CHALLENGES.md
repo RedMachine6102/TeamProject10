@@ -43,8 +43,7 @@ loopback redirect enabled. Then connect the agent:
 ```powershell
 vaultmind-agent email-connect `
   --mail-provider google `
-  --client-id "your-oauth-client-id" `
-  --sender-domain demo=accounts.example
+  --client-id "your-oauth-client-id"
 ```
 
 The agent opens the system browser and uses an authorization-code flow with a
@@ -58,7 +57,15 @@ After the provider returns a refresh token, the agent protects it with Windows
 DPAPI and stores the encrypted file beside the agent configuration under
 `%LOCALAPPDATA%\VaultMind\Agent`. If the provider rotates that token during a
 refresh, the replacement is atomically protected before mailbox processing
-continues. Use:
+continues. A new connection starts with no allowed senders, so code retrieval
+fails closed until an exact provider sender is configured:
+
+```powershell
+vaultmind-agent email-allowlist `
+  --sender-domain demo=accounts.example
+```
+
+Use:
 
 ```powershell
 vaultmind-agent email-status

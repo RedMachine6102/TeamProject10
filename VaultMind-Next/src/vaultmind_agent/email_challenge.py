@@ -40,6 +40,7 @@ def _sender_domain(sender: str) -> str:
 
 def normalize_sender_domains(
     sender_domains: dict[str, list[str]],
+    allow_empty: bool = False,
 ) -> dict[str, list[str]]:
     normalized: dict[str, list[str]] = {}
     for rotation_provider, domains in sender_domains.items():
@@ -50,7 +51,7 @@ def normalize_sender_domains(
         if not values or not all(_valid_domain(domain) for domain in values):
             raise ValueError("sender domain allowlist is invalid")
         normalized[provider_id] = values
-    if not normalized:
+    if not normalized and not allow_empty:
         raise ValueError("at least one sender domain is required")
     return normalized
 
@@ -69,7 +70,9 @@ class LocalEmailCredentials:
             raise ValueError("unsupported local email provider")
         if len(self.client_id) < 8 or len(self.refresh_token) < 20:
             raise ValueError("local email credentials are incomplete")
-        self.sender_domains = normalize_sender_domains(self.sender_domains)
+        self.sender_domains = normalize_sender_domains(
+            self.sender_domains, allow_empty=True
+        )
 
     def save(self, path: Path) -> None:
         raw = json.dumps(asdict(self), separators=(",", ":")).encode("utf-8")

@@ -87,6 +87,36 @@ def email_credentials() -> LocalEmailCredentials:
     )
 
 
+def test_email_credentials_allow_empty_sender_allowlist():
+    credentials = LocalEmailCredentials(
+        provider="google",
+        client_id="local-client-id",
+        client_secret="",
+        refresh_token="refresh-token-value-long-enough",
+        sender_domains={},
+    )
+    assert credentials.sender_domains == {}
+
+
+def test_empty_sender_allowlist_never_reads_mailbox():
+    credentials = LocalEmailCredentials(
+        provider="google",
+        client_id="local-client-id",
+        client_secret="",
+        refresh_token="refresh-token-value-long-enough",
+        sender_domains={},
+    )
+
+    class UnusedMailboxClient:
+        def refresh_access_token(self, credentials):
+            raise AssertionError("mailbox should not be accessed")
+
+    source = LocalEmailCodeSource(credentials, UnusedMailboxClient())
+    assert source.get_code(
+        "demo", datetime.now(timezone.utc) - timedelta(seconds=1)
+    ) is None
+
+
 def test_email_code_source_uses_fresh_exact_allowlisted_sender():
     requested_at = datetime.now(timezone.utc) - timedelta(seconds=5)
     messages = [

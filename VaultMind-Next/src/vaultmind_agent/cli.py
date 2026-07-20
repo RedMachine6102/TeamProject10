@@ -9,7 +9,11 @@ from uuid import uuid4
 from .adapters import HttpProviderAdapter, VerifiedRotationExecutor
 from .client import AgentApiClient, AgentApiError
 from .config import AgentConfig, AgentPaths
-from .email_challenge import LocalEmailCodeSource, LocalEmailCredentials
+from .email_challenge import (
+    LocalEmailCodeSource,
+    LocalEmailCredentials,
+    normalize_sender_domains,
+)
 from .email_oauth import NativeMailboxOAuth
 from .identity import DeviceIdentity
 from .recovery import DpapiPendingRotationStore
@@ -183,8 +187,20 @@ def email_status(paths: AgentPaths) -> int:
     allowed = ", ".join(
         f"{provider}={','.join(domains)}"
         for provider, domains in credentials.sender_domains.items()
-    )
+    ) or "none"
     print(f"Local email provider={credentials.provider}; senders={allowed}")
+    return 0
+
+
+def set_email_allowlist(args: argparse.Namespace, paths: AgentPaths) -> int:
+    if not paths.email_credentials.exists():
+        raise RuntimeError("local email verification is not configured")
+    credentials = LocalEmailCredentials.load(paths.email_credentials)
+    credentials.sender_domains = normalize_sender_domains(
+        _sender_domain_values(args.sender_domain)
+    )
+    credentials.save(paths.email_credentials)
+    print("Local email sender allowlist updated.")
     return 0
 
 
@@ -211,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     connect_parser.add_argument("--client-id", required=True)
     connect_parser.add_argument(
-        "--sender-domain", action="append", required=True,
+        "--sender-domain", action="append", default=[],
         help="allowlist entry such as demo=accounts.example",
     )
     connect_parser.add_argument("--timeout-seconds", type=int, default=180)
@@ -225,6 +241,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="allowlist entry such as demo=accounts.example",
     )
     subparsers.add_parser("email-status")
+    allowlist_parser = subparsers.add_parser("email-allowlist")
+    allowlist_parser.add_argument(
+        "--sender-domain", action="append", required=True,
+        help="allowlist entry such as demo=accounts.example",
+    )
     subparsers.add_parser("email-disconnect")
     return parser
 
@@ -246,6 +267,8 @@ def main() -> int:
             return configure_email(args, paths)
         if args.command == "email-status":
             return email_status(paths)
+        if args.command == "email-allowlist":
+            return set_email_allowlist(args, paths)
         if args.command == "email-disconnect":
             paths.email_credentials.unlink(missing_ok=True)
             print("Local email verification disconnected.")

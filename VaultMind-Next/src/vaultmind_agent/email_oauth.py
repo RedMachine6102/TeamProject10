@@ -133,7 +133,9 @@ class NativeMailboxOAuth:
             raise ValueError("OAuth client id is incomplete")
         if not 30 <= timeout_seconds <= 300:
             raise ValueError("OAuth timeout must be 30 to 300 seconds")
-        sender_domains = normalize_sender_domains(sender_domains)
+        sender_domains = normalize_sender_domains(
+            sender_domains, allow_empty=True
+        )
 
         host = "127.0.0.1" if provider == "google" else "localhost"
         _CallbackHandler.result = None
