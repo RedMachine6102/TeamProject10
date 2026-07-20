@@ -1046,8 +1046,13 @@ class Database:
         now = datetime.now(timezone.utc)
         rows = self._connection.execute(
             """SELECT * FROM rotation_jobs
-               WHERE status='approved'
-                 AND (authorized_agent_id IS NULL OR authorized_agent_id=?)
+               WHERE (
+                   (status='approved'
+                    AND (authorized_agent_id IS NULL OR authorized_agent_id=?))
+                   OR
+                   (status='running' AND lease_owner=?
+                    AND lease_expires_at IS NOT NULL AND lease_expires_at<=?)
+                 )
                  AND (
                    authorized_agent_id IS NULL OR EXISTS (
                      SELECT 1 FROM automation_grants g
@@ -1059,7 +1064,7 @@ class Database:
                    )
                  )
                ORDER BY due_at LIMIT 50""",
-            (agent_id, _iso(now)),
+            (agent_id, agent_id, _iso(now), _iso(now)),
         ).fetchall()
         return [self._job_from_row(row) for row in rows]
 
@@ -1250,7 +1255,17 @@ class Database:
                     raise PermissionError(
                         "automation grant is expired or revoked"
                     )
-            require_transition(JobStatus(row["status"]), JobStatus.RUNNING)
+            reclaiming = row["status"] == JobStatus.RUNNING.value
+            if reclaiming:
+                if row["lease_owner"] != agent_id:
+                    raise PermissionError("job is leased to a different agent")
+                if (
+                    not row["lease_expires_at"]
+                    or _time(row["lease_expires_at"]) > now
+                ):
+                    raise PermissionError("job lease is still active")
+            else:
+                require_transition(JobStatus(row["status"]), JobStatus.RUNNING)
             self._connection.execute(
                 """UPDATE rotation_jobs SET status='running', updated_at=?,
                    lease_owner=?, lease_expires_at=?, attempt_count=attempt_count+1
@@ -1258,8 +1273,14 @@ class Database:
                 (_iso(now), agent_id, _iso(lease_expires), job_id),
             )
             self._append_audit(
-                agent_id, "rotation.job_claimed", "rotation_job", job_id,
-                {"lease_seconds": lease_seconds}, now,
+                agent_id,
+                "rotation.job_reclaimed" if reclaiming else "rotation.job_claimed",
+                "rotation_job", job_id,
+                {
+                    "lease_seconds": lease_seconds,
+                    "previous_status": row["status"],
+                },
+                now,
             )
             updated = self._connection.execute(
                 "SELECT * FROM rotation_jobs WHERE job_id=?", (job_id,)

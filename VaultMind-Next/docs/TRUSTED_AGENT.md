@@ -22,6 +22,10 @@ OAuth token, provider session, or device signing key.
   confirmed response.
 - The API commits the new encrypted record, successful job state, audit events,
   and next rotation date in one SQLite transaction.
+- A foreground agent retries temporary API outages with bounded backoff. If it
+  crashes after claiming but before preparing a provider change, only that same
+  signed agent can reclaim its expired lease. A different device cannot repeat
+  the job.
 - A global `PAUSED` file and a provider allowlist stop execution before any job
   is claimed.
 - A separate hardened scheduler automatically turns due 30/60/90-day policies
@@ -51,6 +55,11 @@ The enrollment code and vault passphrase are read through hidden prompts and are
 not accepted as command-line arguments. The deployment bootstrap token never
 reaches the agent. Configuration and the DPAPI-wrapped device key are stored
 under `%LOCALAPPDATA%\VaultMind\Agent`.
+
+Provider adapters must listen on loopback. The agent rejects remote adapter
+URLs so plaintext credentials cannot be routed through a third-party bridge.
+Each adapter owns its password-generation rule and must verify the new login
+before the encrypted vault update can be committed.
 
 When adding a credential in the web vault, choose **Trusted agent**, select an
 active enrolled device, and choose how long its item-scoped authorization

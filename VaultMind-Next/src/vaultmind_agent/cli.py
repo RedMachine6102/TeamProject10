@@ -112,8 +112,20 @@ def run_loop(runner: TrustedAgentRunner, passphrase: str,
              poll_seconds: int) -> int:
     if not 15 <= poll_seconds <= 3600:
         raise ValueError("poll interval must be 15 to 3600 seconds")
+    consecutive_errors = 0
     while True:
-        outcome = runner.run_once(passphrase)
+        try:
+            outcome = runner.run_once(passphrase)
+            consecutive_errors = 0
+        except AgentApiError as exc:
+            consecutive_errors += 1
+            delay = min(poll_seconds * consecutive_errors, 300)
+            print(
+                f"Agent API unavailable; retrying in {delay} seconds: {exc}",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+            continue
         result = print_outcome(outcome)
         if outcome.status == "recovery_required":
             return result
@@ -185,7 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     enroll_parser.add_argument("--agent-id", default=f"agent-{uuid4()}")
     enroll_parser.add_argument(
         "--adapter", action="append", default=[],
-        help="allowlist entry such as demo=https://adapter.example",
+        help="local allowlist entry such as demo=http://127.0.0.1:8090",
     )
     subparsers.add_parser("run-once")
     run_parser = subparsers.add_parser("run")

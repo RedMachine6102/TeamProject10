@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 from dataclasses import asdict, dataclass, field
@@ -34,13 +35,22 @@ class AgentConfig:
         for provider, url in self.adapter_urls.items():
             if provider not in self.allowed_providers:
                 raise ValueError("adapter URL provider is not allowlisted")
-            self.adapter_urls[provider] = self._safe_url(url)
+            self.adapter_urls[provider] = self._safe_url(
+                url, require_loopback=True
+            )
 
     @staticmethod
-    def _safe_url(value: str) -> str:
+    def _safe_url(value: str, require_loopback: bool = False) -> str:
         value = value.rstrip("/")
         parsed = urlparse(value)
-        local = parsed.hostname in {"localhost", "127.0.0.1"}
+        hostname = parsed.hostname or ""
+        local = hostname == "localhost"
+        try:
+            local = local or ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            pass
+        if require_loopback and not local:
+            raise ValueError("provider adapters must run on the local device")
         if parsed.scheme != "https" and not (local and parsed.scheme == "http"):
             raise ValueError("agent connections require HTTPS except on localhost")
         if (not parsed.hostname or parsed.username or parsed.password

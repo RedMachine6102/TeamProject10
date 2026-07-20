@@ -30,6 +30,9 @@ class EmailCodeSource(Protocol):
 class TrustedProviderAdapter(ABC):
     provider_id: str
 
+    def create_password(self) -> str:
+        return generate_password()
+
     @abstractmethod
     def change_password(self, credential: CredentialMaterial,
                         new_password: str) -> bool | PasswordChangeAttempt:
@@ -61,7 +64,25 @@ class VerifiedRotationExecutor:
 
     def rotate(self, provider_id: str,
                credential: CredentialMaterial) -> VerifiedRotation:
-        return self.rotate_to(provider_id, credential, generate_password())
+        try:
+            new_password = self.prepare_password(provider_id)
+        except ValueError:
+            return VerifiedRotation(
+                False, error_code="provider_password_policy_failed"
+            )
+        return self.rotate_to(provider_id, credential, new_password)
+
+    def prepare_password(self, provider_id: str) -> str:
+        adapter = self._adapters.get(provider_id)
+        if adapter is None:
+            raise ValueError("provider is not allowlisted")
+        try:
+            new_password = adapter.create_password()
+        except Exception as exc:
+            raise ValueError("provider password generation failed") from exc
+        if not isinstance(new_password, str) or not 16 <= len(new_password) <= 1024:
+            raise ValueError("provider generated an invalid password")
+        return new_password
 
     def rotate_to(self, provider_id: str, credential: CredentialMaterial,
                   new_password: str) -> VerifiedRotation:

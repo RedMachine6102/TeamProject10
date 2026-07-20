@@ -48,6 +48,13 @@ class DemoAdapter(TrustedProviderAdapter):
         return username == "owner@example.com" and password == self.password
 
 
+class ProviderPolicyAdapter(DemoAdapter):
+    compatible_password = "Provider-Compatible-Password-42"
+
+    def create_password(self) -> str:
+        return self.compatible_password
+
+
 class FakePendingRotationStore(PendingRotationStore):
     def __init__(self):
         self.pending: PendingRotation | None = None
@@ -219,6 +226,46 @@ def test_agent_rejects_job_ids_that_could_change_request_paths():
         client.claim("../admin/path")
 
 
+def test_agent_requires_provider_adapters_to_run_locally():
+    with pytest.raises(ValueError, match="local device"):
+        AgentConfig(
+            server_url="https://vault.example",
+            agent_id="agent-0001",
+            allowed_providers=["example"],
+            adapter_urls={"example": "https://adapter.example"},
+        )
+    config = AgentConfig(
+        server_url="https://vault.example",
+        agent_id="agent-0001",
+        allowed_providers=["example"],
+        adapter_urls={"example": "http://127.0.0.1:8090"},
+    )
+    assert config.adapter_urls["example"] == "http://127.0.0.1:8090"
+
+
+def test_provider_adapter_controls_compatible_password_generation():
+    adapter = ProviderPolicyAdapter()
+    executor = VerifiedRotationExecutor([adapter])
+    result = executor.rotate(
+        "demo", CredentialMaterial("owner@example.com", "old-password")
+    )
+    assert result.changed is True
+    assert result.new_password == adapter.compatible_password
+    assert adapter.password == adapter.compatible_password
+
+
+def test_provider_adapter_rejects_invalid_generated_password():
+    class InvalidPolicyAdapter(DemoAdapter):
+        def create_password(self) -> str:
+            return "too-short"
+
+    result = VerifiedRotationExecutor([InvalidPolicyAdapter()]).rotate(
+        "demo", CredentialMaterial("owner@example.com", "old-password")
+    )
+    assert result.changed is False
+    assert result.error_code == "provider_password_policy_failed"
+
+
 class RecoveringClient:
     def __init__(self):
         self.allow_commit = False
@@ -349,6 +396,28 @@ def test_foreground_agent_stops_when_manual_recovery_is_required(monkeypatch):
     assert run_loop(SequenceRunner(), PASSPHRASE, 15) == 2
     with pytest.raises(ValueError, match="poll interval"):
         run_loop(SequenceRunner(), PASSPHRASE, 5)
+
+
+def test_foreground_agent_retries_temporary_api_failure(monkeypatch, capsys):
+    class FlakyRunner:
+        calls = 0
+
+        def run_once(self, passphrase: str) -> RotationOutcome:
+            self.calls += 1
+            if self.calls == 1:
+                raise AgentApiError("temporary connection failure")
+            return RotationOutcome(
+                "recovery_required", "pending-job-0001",
+                "provider_state_could_not_be_verified",
+            )
+
+    delays = []
+    monkeypatch.setattr(
+        "vaultmind_agent.cli.time.sleep", lambda seconds: delays.append(seconds)
+    )
+    assert run_loop(FlakyRunner(), PASSPHRASE, 15) == 2
+    assert delays == [15]
+    assert "retrying in 15 seconds" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI test")

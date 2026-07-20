@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from vaultmind_next.automation import CredentialMaterial, generate_password
+from vaultmind_next.automation import CredentialMaterial
 
 from .adapters import VerifiedRotationExecutor
 from .client import AgentApiClient
@@ -62,7 +62,14 @@ class TrustedAgentRunner:
 
         old_password = record["password"]
         username = record["username"]
-        new_password = generate_password()
+        try:
+            new_password = self.executor.prepare_password(provider_id)
+        except ValueError:
+            error = "provider_password_policy_failed"
+            self._report_failure(job_id, error)
+            del record
+            del key
+            return RotationOutcome("failed", job_id, error)
         record["password"] = new_password
         rotated_envelope = encrypt_record(envelope, record, key)
         pending = PendingRotation(

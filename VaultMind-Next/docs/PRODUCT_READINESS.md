@@ -17,9 +17,9 @@ marketing claims.
 | Email security monitoring | Working foundation | Bounded metadata requests, token refresh, sanitization and deduplication tests |
 | AI planning boundary | Working foundation | Sanitized-only input, strict schema, stateless request, no approval/execution fields |
 | Deployed backend | Working foundation | Hardened VM 101 services with persistent data and HTTPS ingress |
-| Verified automated rotation | Working foundation | Signed protocol, change/verify/commit test, idempotent lost-response retry, and DPAPI-protected restart recovery |
+| Verified automated rotation | Working foundation | Local-only provider contract, provider-specific password generation, signed change/verify/commit test, idempotent lost-response retry, and DPAPI-protected restart recovery |
 | Unattended scheduling | Working | Dedicated hardened service created a real due job without an API scan call |
-| Continuous trusted-agent execution | Working foundation | Foreground polling, policy/grant stops, pending-commit retry, and manual-recovery stop |
+| Continuous trusted-agent execution | Working foundation | Foreground polling, bounded outage retry, same-agent expired-lease reclaim, policy/grant stops, pending-commit retry, and manual-recovery stop |
 | Automatic real-site password changes | Not implemented | No reviewed production provider adapter yet |
 | Malware-resistant endpoint storage | Partial | Windows DPAPI at rest; signed packaging and TPM-bound keys remain |
 | Owner account security | Working foundation | User-verifying passkey, one-use challenges, hashed 30-minute sessions, origin checks |

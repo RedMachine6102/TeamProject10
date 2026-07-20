@@ -121,6 +121,39 @@ def test_storage_creates_one_due_job_and_advances_after_success(tmp_path):
     assert verification.valid and verification.events_checked == 7
 
 
+def test_expired_job_lease_can_only_be_reclaimed_by_its_agent(tmp_path):
+    database = Database(str(tmp_path / "reclaim.db"))
+    database.upsert_item(envelope())
+    due = datetime.now(timezone.utc) - timedelta(minutes=1)
+    database.put_policy(RotationPolicyCreate(
+        item_id="item-0001", interval_days=RotationInterval.DAYS_30,
+        approval_mode=ApprovalMode.MANUAL, next_due_at=due,
+    ))
+    job = database.create_due_jobs()[0]
+    database.transition_job(job.job_id, JobStatus.APPROVED)
+    claimed = database.claim_job(job.job_id, "agent-0001")
+    assert claimed.attempt_count == 1
+    assert database.list_available_jobs("agent-0001") == []
+
+    with database._connection:
+        database._connection.execute(
+            "UPDATE rotation_jobs SET lease_expires_at=? WHERE job_id=?",
+            ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+             job.job_id),
+        )
+
+    assert database.list_available_jobs("agent-0002") == []
+    assert database.list_available_jobs("agent-0001")[0].job_id == job.job_id
+    with pytest.raises(PermissionError, match="different agent"):
+        database.claim_job(job.job_id, "agent-0002")
+    reclaimed = database.claim_job(job.job_id, "agent-0001")
+    assert reclaimed.status is JobStatus.RUNNING
+    assert reclaimed.attempt_count == 2
+    assert reclaimed.lease_expires_at > datetime.now(timezone.utc)
+    actions = [event.action for event in database.list_audit_events()]
+    assert "rotation.job_reclaimed" in actions
+
+
 class ExampleAdapter(ProviderAdapter):
     provider_id = "example"
 
