@@ -46,6 +46,13 @@ def test_secret_box_round_trip_and_context_binding():
         box.open(sealed, "connection:456")
 
 
+def test_vault_item_id_rejects_path_and_attribute_characters():
+    values = envelope().model_dump()
+    values["item_id"] = 'item"><script'
+    with pytest.raises(ValueError, match="item_id"):
+        VaultEnvelope(**values)
+
+
 def test_rotation_intervals_and_state_machine():
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
     assert next_rotation(now, RotationInterval.DAYS_30) == now + timedelta(days=30)
@@ -135,7 +142,9 @@ def test_executor_is_allowlisted_and_generates_strong_passwords():
 
 
 def test_automatic_rotation_is_bound_to_a_current_agent_grant(tmp_path):
-    from vaultmind_next.models import AutomationGrantCreate
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from vaultmind_next.models import AutomationGrantCreate, DeviceRegistration
 
     database = Database(str(tmp_path / "automatic.db"))
     database.upsert_item(envelope())
@@ -145,10 +154,18 @@ def test_automatic_rotation_is_bound_to_a_current_agent_grant(tmp_path):
         approval_mode=ApprovalMode.AUTOMATIC,
         next_due_at=now - timedelta(minutes=1),
     ))
-    database.put_automation_grant(AutomationGrantCreate(
+    grant = AutomationGrantCreate(
         item_id="item-0001", agent_id="agent-0001",
         expires_at=now + timedelta(days=7),
+    )
+    with pytest.raises(ValueError, match="active trusted agent"):
+        database.put_automation_grant(grant)
+    key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    database.register_device(DeviceRegistration(
+        device_id="agent-0001", display_name="Agent", platform="windows",
+        public_key=base64.urlsafe_b64encode(key).decode("ascii"),
     ))
+    database.put_automation_grant(grant)
     job = database.create_due_jobs(now)[0]
     assert job.status is JobStatus.APPROVED
     assert job.authorized_agent_id == "agent-0001"
@@ -176,8 +193,85 @@ def test_device_revocation_removes_automation_authority(tmp_path):
     revoked = database.revoke_device("agent-0001")
     assert revoked.status == "revoked"
     assert database.list_automation_grants() == []
+    with pytest.raises(ValueError, match="active trusted agent"):
+        database.put_automation_grant(AutomationGrantCreate(
+            item_id="item-0001", agent_id="agent-0001",
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        ))
     with pytest.raises(KeyError):
         database.get_active_device_key("agent-0001")
+
+
+def test_policy_and_grant_stops_cancel_waiting_automatic_jobs(tmp_path):
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from vaultmind_next.models import AutomationGrantCreate, DeviceRegistration
+
+    database = Database(str(tmp_path / "stops.db"))
+    key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    database.register_device(DeviceRegistration(
+        device_id="agent-0001", display_name="Agent", platform="windows",
+        public_key=base64.urlsafe_b64encode(key).decode("ascii"),
+    ))
+    now = datetime.now(timezone.utc)
+    for item_id in ("item-0001", "item-0002"):
+        database.upsert_item(envelope(item_id))
+        database.put_policy(RotationPolicyCreate(
+            item_id=item_id, interval_days=RotationInterval.DAYS_30,
+            approval_mode=ApprovalMode.AUTOMATIC,
+            next_due_at=now - timedelta(minutes=1),
+        ))
+        database.put_automation_grant(AutomationGrantCreate(
+            item_id=item_id, agent_id="agent-0001",
+            expires_at=now + timedelta(days=30),
+        ))
+    jobs = database.create_due_jobs(now)
+    assert all(job.status is JobStatus.APPROVED for job in jobs)
+
+    database.put_policy(RotationPolicyCreate(
+        item_id="item-0001", interval_days=RotationInterval.DAYS_30,
+        approval_mode=ApprovalMode.AUTOMATIC, enabled=False,
+        next_due_at=now - timedelta(minutes=1),
+    ))
+    database.revoke_automation_grant("item-0002")
+    stopped = {job.item_id: job for job in database.list_jobs()}
+    assert stopped["item-0001"].status is JobStatus.CANCELED
+    assert stopped["item-0001"].error_code == "policy_disabled"
+    assert stopped["item-0002"].status is JobStatus.CANCELED
+    assert stopped["item-0002"].error_code == "automation_grant_revoked"
+
+
+def test_expired_automation_grant_cannot_be_claimed(tmp_path):
+    import base64
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from vaultmind_next.models import AutomationGrantCreate, DeviceRegistration
+
+    database = Database(str(tmp_path / "expired-grant.db"))
+    database.upsert_item(envelope())
+    key = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
+    database.register_device(DeviceRegistration(
+        device_id="agent-0001", display_name="Agent", platform="windows",
+        public_key=base64.urlsafe_b64encode(key).decode("ascii"),
+    ))
+    now = datetime.now(timezone.utc)
+    database.put_policy(RotationPolicyCreate(
+        item_id="item-0001", interval_days=RotationInterval.DAYS_30,
+        approval_mode=ApprovalMode.AUTOMATIC,
+        next_due_at=now - timedelta(minutes=1),
+    ))
+    database.put_automation_grant(AutomationGrantCreate(
+        item_id="item-0001", agent_id="agent-0001",
+        expires_at=now + timedelta(minutes=1),
+    ))
+    job = database.create_due_jobs(now)[0]
+    with database._connection:
+        database._connection.execute(
+            "UPDATE automation_grants SET expires_at=? WHERE item_id=?",
+            ((now - timedelta(seconds=1)).isoformat(), "item-0001"),
+        )
+    assert database.list_available_jobs("agent-0001") == []
+    with pytest.raises(PermissionError, match="expired or revoked"):
+        database.claim_job(job.job_id, "agent-0001")
 
 
 def test_email_oauth_uses_pkce_and_metadata_only_scopes():

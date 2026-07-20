@@ -47,6 +47,15 @@ class VaultEnvelope(BaseModel):
     ciphertext: str = Field(min_length=24, max_length=1_500_000)
     key_version: int = Field(default=1, ge=1)
 
+    @field_validator("item_id")
+    @classmethod
+    def validate_item_id(cls, value: str) -> str:
+        if not value.replace("-", "").replace("_", "").isalnum():
+            raise ValueError(
+                "item_id may contain letters, numbers, hyphens, and underscores"
+            )
+        return value
+
     @field_validator("provider_id")
     @classmethod
     def normalize_provider(cls, value: str) -> str:

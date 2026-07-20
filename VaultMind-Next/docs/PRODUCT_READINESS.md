@@ -10,7 +10,7 @@ marketing claims.
 | --- | --- | --- |
 | Client-encrypted vault records | Working foundation | Random data key, wrapped-key API, migration and agent rotation tests |
 | Vault passphrase change | Working foundation | Rewraps the data key without replacing record ciphertext |
-| 30/60/90-day scheduling | Working foundation | Policy, queue, lease, and transition tests |
+| 30/60/90-day scheduling | Working foundation | Web policy controls, active-agent grant enforcement, queue, lease, and transition tests |
 | Trusted-agent authorization | Working foundation | Device signatures, nonce replay rejection, scoped grants |
 | Email account linking | Working foundation | OAuth code + PKCE integration test, encrypted token storage, revocation |
 | Email verification challenges | Working foundation | Local-only OAuth storage, bounded mailbox reads, exact sender/time checks, ambiguity rejection, and provider challenge tests |
@@ -19,7 +19,7 @@ marketing claims.
 | Deployed backend | Working foundation | Hardened VM 101 services with persistent data and HTTPS ingress |
 | Verified automated rotation | Working foundation | Signed protocol, change/verify/commit test, idempotent lost-response retry, and DPAPI-protected restart recovery |
 | Unattended scheduling | Working | Dedicated hardened service created a real due job without an API scan call |
-| Continuous trusted-agent execution | Working foundation | Foreground polling, pause control, pending-commit retry, and manual-recovery stop |
+| Continuous trusted-agent execution | Working foundation | Foreground polling, policy/grant stops, pending-commit retry, and manual-recovery stop |
 | Automatic real-site password changes | Not implemented | No reviewed production provider adapter yet |
 | Malware-resistant endpoint storage | Partial | Windows DPAPI at rest; signed packaging and TPM-bound keys remain |
 | Owner account security | Working foundation | User-verifying passkey, one-use challenges, hashed 30-minute sessions, origin checks |

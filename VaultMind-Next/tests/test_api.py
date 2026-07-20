@@ -144,6 +144,33 @@ def test_readiness_fails_closed_when_database_is_unavailable(tmp_path):
     assert response.json() == {"status": "unavailable", "database": "failed"}
 
 
+def test_owner_can_cancel_waiting_rotation(tmp_path):
+    client = TestClient(create_app(str(tmp_path / "cancel.db"), TOKEN))
+    assert client.put(
+        "/api/v1/vault/items", json=sample_item(), headers=HEADERS
+    ).status_code == 200
+    due = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    assert client.put(
+        "/api/v1/rotation/policies", headers=HEADERS,
+        json={
+            "item_id": "item-0001", "interval_days": 30,
+            "approval_mode": "manual", "enabled": True,
+            "next_due_at": due,
+        },
+    ).status_code == 200
+    job = client.post(
+        "/api/v1/rotation/scan", headers=HEADERS
+    ).json()[0]
+    canceled = client.post(
+        f"/api/v1/rotation/jobs/{job['job_id']}/cancel", headers=HEADERS
+    )
+    assert canceled.status_code == 200
+    assert canceled.json()["status"] == "canceled"
+    assert client.post(
+        f"/api/v1/rotation/jobs/{job['job_id']}/approve", headers=HEADERS
+    ).status_code == 409
+
+
 def test_vault_key_envelope_is_opaque_and_can_be_rewrapped(tmp_path):
     database_path = tmp_path / "key-envelope.db"
     client = TestClient(create_app(str(database_path), TOKEN))

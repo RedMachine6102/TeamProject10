@@ -52,6 +52,22 @@ not accepted as command-line arguments. The deployment bootstrap token never
 reaches the agent. Configuration and the DPAPI-wrapped device key are stored
 under `%LOCALAPPDATA%\VaultMind\Agent`.
 
+When adding a credential in the web vault, choose **Trusted agent**, select an
+active enrolled device, and choose how long its item-scoped authorization
+remains valid. Automatic policies without a current active-device grant remain
+manual and cannot be claimed as unattended work.
+
+The Rotations view can pause or resume each policy and revoke each item grant.
+Pausing a policy or revoking its grant immediately cancels waiting work. A job
+already changing a provider is allowed only to finish or reconcile, avoiding a
+half-changed credential. Grant expiry and active-device status are checked
+again when work is listed and claimed, so an earlier approval cannot outlive its
+authorization.
+
+Manual policies appear on the overview as proposed jobs. The owner can approve,
+retry, or cancel waiting jobs from that view; these controls require the same
+authenticated owner session as other vault administration.
+
 Run at most one job:
 
 ```powershell

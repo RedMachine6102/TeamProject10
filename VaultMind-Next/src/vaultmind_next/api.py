@@ -583,6 +583,11 @@ def create_app(database_path: str | None = None, api_key: str | None = None,
     def approve_job(job_id: str) -> RotationJob:
         return _transition(database, job_id, JobStatus.APPROVED)
 
+    @app.post("/api/v1/rotation/jobs/{job_id}/cancel", response_model=RotationJob,
+              dependencies=protected)
+    def cancel_job(job_id: str) -> RotationJob:
+        return _transition(database, job_id, JobStatus.CANCELED)
+
     @app.post("/api/v1/agent/jobs/available", response_model=list[RotationJob])
     def available_agent_jobs(action: AgentAction) -> list[RotationJob]:
         _verify_agent_action(

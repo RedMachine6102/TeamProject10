@@ -357,12 +357,40 @@ function renderJobs(container, jobs) {
     return;
   }
   container.className = "";
-  container.innerHTML = jobs.slice(0, 8).map(job => `
-    <div class="job"><div><strong>${escapeText(job.provider_id)}</strong><br>
-    <small>${escapeText(job.status)} · ${new Date(job.due_at).toLocaleDateString()}</small></div>
-    <span class="pill ${job.status === "proposed" ? "offline" : "online"}">${escapeText(job.status)}</span></div>
-  `).join("");
+  container.innerHTML = jobs.slice(0, 8).map(job => {
+    const actions = [];
+    if (job.status === "proposed" || job.status === "failed") {
+      actions.push(`<button class="secondary job-action" data-job-id="${escapeAttribute(job.job_id)}" data-action="approve">${job.status === "failed" ? "Retry" : "Approve"}</button>`);
+    }
+    if (["proposed", "approved", "failed"].includes(job.status)) {
+      actions.push(`<button class="danger job-action" data-job-id="${escapeAttribute(job.job_id)}" data-action="cancel">Cancel</button>`);
+    }
+    return `<div class="job"><div><strong>${escapeText(job.provider_id)}</strong><br>
+      <small>${escapeText(job.status)} · ${new Date(job.due_at).toLocaleDateString()}</small></div>
+      <div class="header-actions"><span class="pill ${job.status === "proposed" ? "offline" : "online"}">${escapeText(job.status)}</span>
+      ${actions.join("")}</div></div>`;
+  }).join("");
 }
+
+document.querySelector("#job-list").addEventListener("click", async event => {
+  const button = event.target.closest("button.job-action");
+  if (!button) return;
+  if (!["approve", "cancel"].includes(button.dataset.action)) return;
+  if (
+    button.dataset.action === "cancel"
+    && !window.confirm("Cancel this waiting rotation?")
+  ) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/v1/rotation/jobs/${encodeURIComponent(button.dataset.jobId)}/${button.dataset.action}`,
+      { method: "POST" },
+    );
+    await refreshOverview();
+  } catch (error) {
+    showError(document.querySelector("#job-list"), error.message);
+  }
+});
 
 async function loadVault() {
   const container = document.querySelector("#vault-list");
@@ -404,18 +432,61 @@ async function loadRotations() {
     policyList.className = policies.length ? "" : "empty-state";
     policyList.innerHTML = policies.length ? policies.map(policy => `
       <div class="job"><div><strong>${policy.interval_days}-day rotation</strong><br>
-      <small>${escapeText(policy.approval_mode)} · next ${new Date(policy.next_due_at).toLocaleDateString()}</small></div>
-      <span class="pill ${policy.enabled ? "online" : "offline"}">${policy.enabled ? "active" : "paused"}</span></div>
+      <small>${escapeText(policy.item_id)} · ${escapeText(policy.approval_mode)} · next ${new Date(policy.next_due_at).toLocaleDateString()}</small></div>
+      <div class="header-actions"><span class="pill ${policy.enabled ? "online" : "offline"}">${policy.enabled ? "active" : "paused"}</span>
+      <button class="secondary toggle-policy" data-item-id="${escapeAttribute(policy.item_id)}"
+        data-interval="${policy.interval_days}" data-approval="${escapeAttribute(policy.approval_mode)}"
+        data-next-due="${escapeAttribute(policy.next_due_at)}" data-enabled="${policy.enabled}">
+        ${policy.enabled ? "Pause" : "Resume"}</button></div></div>
     `).join("") : "No rotation policies yet.";
     grantList.className = grants.length ? "" : "empty-state";
     grantList.innerHTML = grants.length ? grants.map(grant => `
       <div class="job"><div><strong>${escapeText(grant.agent_id)}</strong><br>
-      <small>expires ${new Date(grant.expires_at).toLocaleDateString()}</small></div><span class="pill online">scoped</span></div>
+      <small>${escapeText(grant.item_id)} · expires ${new Date(grant.expires_at).toLocaleDateString()}</small></div>
+      <div class="header-actions"><span class="pill online">scoped</span>
+      <button class="danger revoke-grant" data-item-id="${escapeAttribute(grant.item_id)}">Revoke</button></div></div>
     `).join("") : "Automatic rotations require an item-scoped trusted-agent grant.";
   } catch (error) {
     showError(policyList, error.message);
   }
 }
+
+document.querySelector("#policy-list").addEventListener("click", async event => {
+  const button = event.target.closest("button.toggle-policy");
+  if (!button) return;
+  button.disabled = true;
+  try {
+    await api("/api/v1/rotation/policies", {
+      method: "PUT",
+      body: JSON.stringify({
+        item_id: button.dataset.itemId,
+        interval_days: Number(button.dataset.interval),
+        approval_mode: button.dataset.approval,
+        enabled: button.dataset.enabled !== "true",
+        next_due_at: button.dataset.nextDue,
+      }),
+    });
+    await Promise.all([loadRotations(), refreshOverview()]);
+  } catch (error) {
+    showError(document.querySelector("#policy-list"), error.message);
+  }
+});
+
+document.querySelector("#grant-list").addEventListener("click", async event => {
+  const button = event.target.closest("button.revoke-grant");
+  if (!button) return;
+  if (!window.confirm("Revoke this agent's authorization for the item?")) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/v1/automation/grants/${encodeURIComponent(button.dataset.itemId)}`,
+      { method: "DELETE" },
+    );
+    await Promise.all([loadRotations(), refreshOverview()]);
+  } catch (error) {
+    showError(document.querySelector("#grant-list"), error.message);
+  }
+});
 
 async function loadConnections() {
   const container = document.querySelector("#provider-list");
@@ -436,9 +507,9 @@ async function loadConnections() {
       ${connection ? `<p class="connection-state"><strong>${escapeText(connection.email_address)}</strong><br>
         <span class="pill ${active ? "online" : "offline"}">${escapeText(connection.status)}</span></p>` : ""}
       <ul class="scope-list">${provider.scopes.map(scope => `<li>${escapeText(scope)}</li>`).join("")}</ul>
-      <div class="connection-actions"><button class="secondary oauth-connect" data-provider="${provider.provider}"
+      <div class="connection-actions"><button class="secondary oauth-connect" data-provider="${escapeAttribute(provider.provider)}"
         ${provider.configured ? "" : "disabled"}>${provider.configured ? (active ? `Reconnect ${label}` : `Connect ${label}`) : "OAuth setup required"}</button>
-      ${active ? `<button class="danger oauth-revoke" data-provider="${provider.provider}">Revoke</button>` : ""}</div></article>`;
+      ${active ? `<button class="danger oauth-revoke" data-provider="${escapeAttribute(provider.provider)}">Revoke</button>` : ""}</div></article>`;
     }).join("");
     eventList.className = events.length ? "" : "empty-state";
     eventList.innerHTML = events.length ? events.map(event => {
@@ -487,7 +558,7 @@ async function loadSecurity() {
       <div class="job"><div><strong>${escapeText(device.display_name)}</strong><br>
       <small>${escapeText(device.platform)} · last seen ${new Date(device.last_seen_at).toLocaleString()}</small></div>
       <div class="header-actions"><span class="pill ${device.status === "active" ? "online" : "offline"}">${escapeText(device.status)}</span>
-      ${device.status === "active" ? `<button class="danger revoke-device" data-device-id="${escapeText(device.device_id)}">Revoke</button>` : ""}</div></div>
+      ${device.status === "active" ? `<button class="danger revoke-device" data-device-id="${escapeAttribute(device.device_id)}">Revoke</button>` : ""}</div></div>
     `).join("") : "No trusted agents registered.";
   } catch (error) {
     showError(devices, error.message);
@@ -556,6 +627,12 @@ function escapeText(value) {
   return span.innerHTML;
 }
 
+function escapeAttribute(value) {
+  return escapeText(value)
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function loadView(view) {
   if (!isAuthenticated) return;
   if (view === "overview") await refreshOverview();
@@ -590,24 +667,60 @@ document.querySelector("#unlock-form").addEventListener("submit", async event =>
     error.textContent = "The passphrase could not unlock this local vault.";
   }
 });
-document.querySelector("#add-button").addEventListener("click", () => {
+const credentialApproval = document.querySelector("#credential-approval");
+const credentialAgent = document.querySelector("#credential-agent");
+
+function updateCredentialAutomationFields() {
+  const automatic = credentialApproval.value === "automatic";
+  document.querySelector("#credential-agent-field").hidden = !automatic;
+  document.querySelector("#credential-grant-field").hidden = !automatic;
+  document.querySelector("#credential-automation-note").hidden = !automatic;
+  credentialAgent.required = automatic;
+}
+
+async function loadCredentialAgents() {
+  const devices = await api("/api/v1/devices");
+  const active = devices.filter(device => device.status === "active");
+  credentialAgent.innerHTML = active.length
+    ? active.map(device => `<option value="${escapeText(device.device_id)}">${escapeText(device.display_name)} (${escapeText(device.device_id)})</option>`).join("")
+    : '<option value="">No active trusted agents</option>';
+}
+
+credentialApproval.addEventListener("change", updateCredentialAutomationFields);
+updateCredentialAutomationFields();
+
+document.querySelector("#add-button").addEventListener("click", async () => {
   if (!isAuthenticated) return connectDialog.showModal();
   if (!vaultKey) return unlockDialog.showModal();
+  const error = document.querySelector("#credential-error");
   credentialDialog.showModal();
+  try {
+    await loadCredentialAgents();
+    error.textContent = "";
+  } catch (caught) {
+    error.textContent = caught.message;
+  }
 });
 document.querySelector("#credential-form").addEventListener("submit", async event => {
   event.preventDefault();
   const error = document.querySelector("#credential-error");
+  let itemId = null;
+  let itemCreated = false;
   try {
     const site = new URL(document.querySelector("#credential-site").value);
     if (site.protocol !== "https:") throw new Error("The site URL must use HTTPS.");
+    const approvalMode = credentialApproval.value;
+    const agentId = credentialAgent.value;
+    if (approvalMode === "automatic" && !agentId) {
+      throw new Error("Enroll and select an active trusted agent first.");
+    }
     const payload = {
       title: document.querySelector("#credential-title").value.trim(),
       username: document.querySelector("#credential-username").value.trim(),
       password: document.querySelector("#credential-password").value,
     };
     const encrypted = await encryptWithKey(vaultKey, payload);
-    const itemId = crypto.randomUUID();
+    itemId = crypto.randomUUID();
     const labels = site.hostname.split(".");
     const provider = (labels.length > 1 ? labels[labels.length - 2] : labels[0])
       .replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
@@ -616,18 +729,47 @@ document.querySelector("#credential-form").addEventListener("submit", async even
       kdf_salt: vaultItemSalt,
       nonce: encrypted.nonce, ciphertext: encrypted.ciphertext, key_version: 2,
     }) });
+    itemCreated = true;
     await api("/api/v1/rotation/policies", { method: "PUT", body: JSON.stringify({
       item_id: itemId,
       interval_days: Number(document.querySelector("#credential-interval").value),
-      approval_mode: document.querySelector("#credential-approval").value,
+      approval_mode: approvalMode,
       enabled: true,
     }) });
+    if (approvalMode === "automatic") {
+      const grantDays = Number(
+        document.querySelector("#credential-grant-days").value
+      );
+      await api("/api/v1/automation/grants", {
+        method: "PUT",
+        body: JSON.stringify({
+          item_id: itemId,
+          agent_id: agentId,
+          expires_at: new Date(
+            Date.now() + grantDays * 24 * 60 * 60 * 1000
+          ).toISOString(),
+        }),
+      });
+    }
     event.target.reset();
+    updateCredentialAutomationFields();
     error.textContent = "";
     credentialDialog.close();
     await refreshOverview();
   } catch (caught) {
-    error.textContent = caught.message;
+    let cleanupFailed = false;
+    if (itemCreated) {
+      try {
+        await api(`/api/v1/vault/items/${encodeURIComponent(itemId)}`, {
+          method: "DELETE",
+        });
+      } catch {
+        cleanupFailed = true;
+      }
+    }
+    error.textContent = cleanupFailed
+      ? `${caught.message} The partial item could not be removed automatically.`
+      : caught.message;
   }
 });
 async function scanRotations() {

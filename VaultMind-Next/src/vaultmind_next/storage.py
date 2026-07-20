@@ -731,6 +731,10 @@ class Database:
                  "approval_mode": request.approval_mode.value,
                  "enabled": request.enabled}, now,
             )
+            if not request.enabled:
+                self._cancel_waiting_jobs(
+                    request.item_id, "policy_disabled", now
+                )
         values = request.model_dump(exclude={"next_due_at"})
         return RotationPolicy(**values, next_due_at=due, updated_at=now)
 
@@ -752,6 +756,14 @@ class Database:
             if not self._connection.execute(
                     "SELECT 1 FROM vault_items WHERE item_id=?", (request.item_id,)).fetchone():
                 raise KeyError("vault item does not exist")
+            if not self._connection.execute(
+                """SELECT 1 FROM devices
+                   WHERE device_id=? AND status='active'""",
+                (request.agent_id,),
+            ).fetchone():
+                raise ValueError(
+                    "automation grant requires an active trusted agent"
+                )
             existing = self._connection.execute(
                 "SELECT created_at FROM automation_grants WHERE item_id=?",
                 (request.item_id,),
@@ -801,6 +813,35 @@ class Database:
             )
             self._connection.execute(
                 "DELETE FROM automation_grants WHERE item_id=?", (item_id,)
+            )
+            self._cancel_waiting_jobs(
+                item_id, "automation_grant_revoked", now, row["agent_id"]
+            )
+
+    def _cancel_waiting_jobs(
+        self, item_id: str, error_code: str, now: datetime,
+        agent_id: str | None = None,
+    ) -> None:
+        query = (
+            """SELECT job_id, status FROM rotation_jobs
+               WHERE item_id=? AND status IN ('proposed', 'approved')"""
+        )
+        parameters: tuple[str, ...] = (item_id,)
+        if agent_id is not None:
+            query += " AND authorized_agent_id=?"
+            parameters = (item_id, agent_id)
+        rows = self._connection.execute(query, parameters).fetchall()
+        for row in rows:
+            self._connection.execute(
+                """UPDATE rotation_jobs
+                   SET status='canceled', updated_at=?, error_code=?
+                   WHERE job_id=?""",
+                (_iso(now), error_code, row["job_id"]),
+            )
+            self._append_audit(
+                "api", "rotation.job_canceled", "rotation_job", row["job_id"],
+                {"previous_status": row["status"], "error_code": error_code},
+                now,
             )
 
     def create_device_enrollment(self, code_hash: str, created_by: str,
@@ -948,11 +989,13 @@ class Database:
     def create_due_jobs(self, now: datetime | None = None) -> list[RotationJob]:
         now = now or datetime.now(timezone.utc)
         rows = self._connection.execute(
-            """SELECT p.*, v.provider_id, g.agent_id AS grant_agent,
+            """SELECT p.*, v.provider_id, d.device_id AS grant_agent,
                       g.expires_at AS grant_expires
                FROM rotation_policies p
                JOIN vault_items v ON v.item_id=p.item_id
                LEFT JOIN automation_grants g ON g.item_id=p.item_id
+               LEFT JOIN devices d
+                 ON d.device_id=g.agent_id AND d.status='active'
                WHERE p.enabled=1 AND p.next_due_at<=?""", (_iso(now),)
         ).fetchall()
         created: list[RotationJob] = []
@@ -1000,12 +1043,23 @@ class Database:
         return [self._job_from_row(row) for row in rows]
 
     def list_available_jobs(self, agent_id: str) -> list[RotationJob]:
+        now = datetime.now(timezone.utc)
         rows = self._connection.execute(
             """SELECT * FROM rotation_jobs
                WHERE status='approved'
                  AND (authorized_agent_id IS NULL OR authorized_agent_id=?)
+                 AND (
+                   authorized_agent_id IS NULL OR EXISTS (
+                     SELECT 1 FROM automation_grants g
+                     JOIN devices d
+                       ON d.device_id=g.agent_id AND d.status='active'
+                     WHERE g.item_id=rotation_jobs.item_id
+                       AND g.agent_id=rotation_jobs.authorized_agent_id
+                       AND g.expires_at>?
+                   )
+                 )
                ORDER BY due_at LIMIT 50""",
-            (agent_id,),
+            (agent_id, _iso(now)),
         ).fetchall()
         return [self._job_from_row(row) for row in rows]
 
@@ -1184,6 +1238,18 @@ class Database:
                 raise KeyError("rotation job does not exist")
             if row["authorized_agent_id"] and row["authorized_agent_id"] != agent_id:
                 raise PermissionError("job is restricted to its authorized agent")
+            if row["authorized_agent_id"]:
+                grant = self._connection.execute(
+                    """SELECT g.expires_at FROM automation_grants g
+                       JOIN devices d
+                         ON d.device_id=g.agent_id AND d.status='active'
+                       WHERE g.item_id=? AND g.agent_id=?""",
+                    (row["item_id"], agent_id),
+                ).fetchone()
+                if grant is None or _time(grant["expires_at"]) <= now:
+                    raise PermissionError(
+                        "automation grant is expired or revoked"
+                    )
             require_transition(JobStatus(row["status"]), JobStatus.RUNNING)
             self._connection.execute(
                 """UPDATE rotation_jobs SET status='running', updated_at=?,
