@@ -61,10 +61,11 @@ URLs so plaintext credentials cannot be routed through a third-party bridge.
 Each adapter owns its password-generation rule and must verify the new login
 before the encrypted vault update can be committed.
 
-When adding a credential in the web vault, choose **Trusted agent**, select an
-active enrolled device, and choose how long its item-scoped authorization
-remains valid. Automatic policies without a current active-device grant remain
-manual and cannot be claimed as unattended work.
+When adding a credential in the web vault, enter the exact provider ID used by
+the agent's `--adapter` entry, choose **Trusted agent**, select an active
+enrolled device, and choose how long its item-scoped authorization remains
+valid. Automatic policies without a current active-device grant remain manual
+and cannot be claimed as unattended work.
 
 The Rotations view can pause or resume each policy and revoke each item grant.
 Pausing a policy or revoking its grant immediately cancels waiting work. A job

@@ -13,6 +13,7 @@ def test_automatic_rotation_form_creates_scoped_agent_grant():
 
     assert 'id="credential-agent"' in html
     assert 'id="credential-grant-days"' in html
+    assert 'id="credential-provider"' in html
     assert 'device.status === "active"' in script
     assert 'api("/api/v1/automation/grants"' in form_handler
     assert 'approvalMode === "automatic"' in form_handler
@@ -22,3 +23,5 @@ def test_automatic_rotation_form_creates_scoped_agent_grant():
     assert 'data-action="approve"' in script
     assert 'data-action="cancel"' in script
     assert "escapeAttribute" in script
+    assert '"#credential-provider"' in form_handler
+    assert "site.hostname.split" not in form_handler

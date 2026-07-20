@@ -709,6 +709,14 @@ document.querySelector("#credential-form").addEventListener("submit", async even
   try {
     const site = new URL(document.querySelector("#credential-site").value);
     if (site.protocol !== "https:") throw new Error("The site URL must use HTTPS.");
+    const provider = document.querySelector(
+      "#credential-provider"
+    ).value.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{2,80}$/.test(provider)) {
+      throw new Error(
+        "The provider adapter ID must use 2–80 letters, numbers, hyphens, or underscores."
+      );
+    }
     const approvalMode = credentialApproval.value;
     const agentId = credentialAgent.value;
     if (approvalMode === "automatic" && !agentId) {
@@ -721,9 +729,6 @@ document.querySelector("#credential-form").addEventListener("submit", async even
     };
     const encrypted = await encryptWithKey(vaultKey, payload);
     itemId = crypto.randomUUID();
-    const labels = site.hostname.split(".");
-    const provider = (labels.length > 1 ? labels[labels.length - 2] : labels[0])
-      .replace(/[^a-z0-9_-]/gi, "-").toLowerCase();
     await api("/api/v1/vault/items", { method: "PUT", body: JSON.stringify({
       item_id: itemId, provider_id: provider, site_origin: site.origin,
       kdf_salt: vaultItemSalt,
