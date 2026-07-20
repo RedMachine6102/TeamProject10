@@ -531,6 +531,8 @@ def create_app(database_path: str | None = None, api_key: str | None = None,
             database.delete_item(item_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.put("/api/v1/rotation/policies", response_model=RotationPolicy,
              dependencies=protected)

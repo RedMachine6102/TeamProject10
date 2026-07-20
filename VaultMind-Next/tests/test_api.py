@@ -171,6 +171,40 @@ def test_owner_can_cancel_waiting_rotation(tmp_path):
     ).status_code == 409
 
 
+def test_vault_item_cannot_change_during_unfinished_rotation(tmp_path):
+    client = TestClient(create_app(str(tmp_path / "item-guard.db"), TOKEN))
+    item = sample_item()
+    assert client.put(
+        "/api/v1/vault/items", json=item, headers=HEADERS
+    ).status_code == 200
+    due = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    assert client.put(
+        "/api/v1/rotation/policies", headers=HEADERS,
+        json={
+            "item_id": item["item_id"], "interval_days": 30,
+            "approval_mode": "manual", "enabled": True,
+            "next_due_at": due,
+        },
+    ).status_code == 200
+    job = client.post(
+        "/api/v1/rotation/scan", headers=HEADERS
+    ).json()[0]
+
+    assert client.put(
+        "/api/v1/vault/items", json=item, headers=HEADERS
+    ).status_code == 409
+    assert client.delete(
+        f"/api/v1/vault/items/{item['item_id']}", headers=HEADERS
+    ).status_code == 409
+
+    assert client.post(
+        f"/api/v1/rotation/jobs/{job['job_id']}/cancel", headers=HEADERS
+    ).status_code == 200
+    assert client.delete(
+        f"/api/v1/vault/items/{item['item_id']}", headers=HEADERS
+    ).status_code == 204
+
+
 def test_vault_key_envelope_is_opaque_and_can_be_rewrapped(tmp_path):
     database_path = tmp_path / "key-envelope.db"
     client = TestClient(create_app(str(database_path), TOKEN))

@@ -632,6 +632,16 @@ class Database:
             existing = self._connection.execute(
                 "SELECT created_at FROM vault_items WHERE item_id=?", (item.item_id,)
             ).fetchone()
+            if existing and self._connection.execute(
+                """SELECT 1 FROM rotation_jobs
+                   WHERE item_id=?
+                     AND status IN ('proposed', 'approved', 'running', 'failed')
+                   LIMIT 1""",
+                (item.item_id,),
+            ).fetchone():
+                raise ValueError(
+                    "vault item cannot change while a rotation job is unfinished"
+                )
             created = _time(existing["created_at"]) if existing else now
             self._connection.execute(
                 """INSERT INTO vault_items
@@ -699,6 +709,16 @@ class Database:
             ).fetchone()
             if row is None:
                 raise KeyError("vault item does not exist")
+            if self._connection.execute(
+                """SELECT 1 FROM rotation_jobs
+                   WHERE item_id=?
+                     AND status IN ('proposed', 'approved', 'running', 'failed')
+                   LIMIT 1""",
+                (item_id,),
+            ).fetchone():
+                raise ValueError(
+                    "vault item cannot be deleted while a rotation job is unfinished"
+                )
             self._append_audit(
                 "api", "vault.item_deleted", "vault_item", item_id,
                 {"provider_id": row["provider_id"]}, now,

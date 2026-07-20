@@ -154,6 +154,26 @@ def test_expired_job_lease_can_only_be_reclaimed_by_its_agent(tmp_path):
     assert "rotation.job_reclaimed" in actions
 
 
+def test_running_rotation_blocks_vault_item_mutation(tmp_path):
+    database = Database(str(tmp_path / "running-mutation.db"))
+    original = envelope()
+    database.upsert_item(original)
+    database.put_policy(RotationPolicyCreate(
+        item_id=original.item_id, interval_days=RotationInterval.DAYS_30,
+        approval_mode=ApprovalMode.MANUAL,
+        next_due_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+    ))
+    job = database.create_due_jobs()[0]
+    database.transition_job(job.job_id, JobStatus.APPROVED)
+    database.claim_job(job.job_id, "agent-0001")
+
+    with pytest.raises(ValueError, match="rotation job is unfinished"):
+        database.upsert_item(original)
+    with pytest.raises(ValueError, match="rotation job is unfinished"):
+        database.delete_item(original.item_id)
+    assert database.list_items()[0].item_id == original.item_id
+
+
 class ExampleAdapter(ProviderAdapter):
     provider_id = "example"
 

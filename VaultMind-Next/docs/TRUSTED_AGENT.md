@@ -74,6 +74,10 @@ half-changed credential. Grant expiry and active-device status are checked
 again when work is listed and claimed, so an earlier approval cannot outlive its
 authorization.
 
+The API blocks vault-item replacement or deletion while any proposed, approved,
+running, or failed rotation remains unfinished. Cancel waiting or failed work
+first; running work must finish or be reconciled.
+
 Manual policies appear on the overview as proposed jobs. The owner can approve,
 retry, or cancel waiting jobs from that view; these controls require the same
 authenticated owner session as other vault administration.
