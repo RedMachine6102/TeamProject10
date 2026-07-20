@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VaultMind Next</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">V</span><span>VaultMind</span></div>
+      <nav>
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="vault">Vault</button>
+        <button class="nav-item" data-view="rotations">Rotations</button>
+        <button class="nav-item" data-view="connections">Connections</button>
+        <button class="nav-item" data-view="security">Security</button>
+      </nav>
+      <div class="trust-card">
+        <span class="status-dot"></span>
+        <div><strong>Zero-knowledge</strong><small>Vault contents stay encrypted</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header>
+        <div><p class="eyebrow">CONTROL CENTER</p><h1>Good evening.</h1></div>
+        <div class="header-actions">
+          <span id="api-state" class="pill offline">Disconnected</span>
+          <button id="connect-button" class="secondary">Connect</button>
+          <button id="add-button" class="primary">Add credential</button>
+        </div>
+      </header>
+
+      <section id="overview" class="view active-view">
+        <div class="hero">
+          <div><span class="hero-label">Vault state</span><div id="security-state" class="score state-word">Setup</div>
+            <p id="security-message">Create the owner passkey before storing credentials.</p></div>
+          <div class="orb"><span id="protection-state">Waiting</span></div>
+        </div>
+        <div class="metrics">
+          <article><span>Vault items</span><strong id="vault-items">—</strong><small>Client encrypted</small></article>
+          <article><span>Active policies</span><strong id="active-policies">—</strong><small>30, 60, or 90 days</small></article>
+          <article><span>Rotations due</span><strong id="rotations-due">—</strong><small>Waiting for agent</small></article>
+          <article><span>Needs approval</span><strong id="needs-approval">—</strong><small>Human checkpoint</small></article>
+        </div>
+        <div class="grid">
+          <article class="panel activity-panel">
+            <div class="panel-title"><div><span class="eyebrow">AUTOMATION</span><h2>Rotation queue</h2></div>
+              <button id="scan-button" class="secondary">Scan now</button></div>
+            <div id="job-list" class="empty-state">Connect to load rotation activity.</div>
+          </article>
+          <article class="panel">
+            <span class="eyebrow">PROTECTION</span><h2>Security layers</h2>
+            <ul class="security-list">
+              <li><span>01</span><div><strong>Client-side encryption</strong><small>Plaintext never reaches the API</small></div></li>
+              <li><span>02</span><div><strong>Isolated execution</strong><small>Provider access stays out of AI context</small></div></li>
+              <li><span>03</span><div><strong>Explicit authority</strong><small>Every action is scoped and audited</small></div></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="vault" class="view">
+        <div class="section-heading"><div><p class="eyebrow">ZERO-KNOWLEDGE</p><h2>Encrypted vault</h2></div>
+          <div class="header-actions"><span id="vault-lock-state" class="pill offline">Locked</span>
+            <button id="unlock-button" class="secondary">Unlock locally</button></div></div>
+        <article class="panel"><p id="vault-error" class="form-error"></p><div id="vault-list" class="empty-state">Connect and unlock to load vault items.</div></article>
+      </section>
+
+      <section id="rotations" class="view">
+        <div class="section-heading"><div><p class="eyebrow">CONTROLLED AUTOMATION</p><h2>Rotation policies</h2></div>
+          <button id="rotation-scan-button" class="secondary">Scan due policies</button></div>
+        <div class="grid"><article class="panel"><h2>Policies</h2><div id="policy-list" class="empty-state">No policies loaded.</div></article>
+          <article class="panel"><h2>Agent grants</h2><div id="grant-list" class="empty-state">No grants loaded.</div></article></div>
+      </section>
+
+      <section id="connections" class="view">
+        <div class="section-heading"><div><p class="eyebrow">LEAST PRIVILEGE</p><h2>Email connections</h2></div></div>
+        <p class="section-copy">Connections use metadata-only access for security notifications. Message bodies stay outside the automation planner.</p>
+        <div id="provider-list" class="provider-grid"><div class="empty-state">Connect to load providers.</div></div>
+        <article class="panel compact-panel"><h2>Sanitized security events</h2>
+          <div id="email-event-list" class="empty-state">No security metadata loaded.</div></article>
+      </section>
+
+      <section id="security" class="view">
+        <div class="section-heading"><div><p class="eyebrow">TRUST & INTEGRITY</p><h2>Security center</h2></div>
+          <div class="header-actions"><button id="change-passphrase-button" class="secondary">Change vault passphrase</button>
+            <button id="enroll-agent-button" class="secondary">Enroll agent</button>
+            <button id="logout-all-button" class="danger">Sign out everywhere</button>
+            <button id="verify-audit-button" class="secondary">Verify audit chain</button></div></div>
+        <div id="enrollment-code" class="enrollment-code" hidden>
+          <strong>One-time agent enrollment code</strong>
+          <code id="enrollment-code-value"></code>
+          <small id="enrollment-code-expiry"></small>
+        </div>
+        <div class="grid"><article class="panel"><h2>Audit integrity</h2><div id="audit-status" class="empty-state">Not verified yet.</div></article>
+          <article class="panel"><h2>Trusted devices</h2><div id="device-list" class="empty-state">No devices loaded.</div></article></div>
+        <article class="panel compact-panel"><h2>Backend readiness</h2><div id="backend-readiness" class="empty-state">Not checked yet.</div></article>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="connect-dialog">
+    <form method="dialog" id="auth-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="eyebrow">PHISHING-RESISTANT ACCESS</p><h2>VaultMind passkey</h2>
+      <p id="auth-dialog-copy" class="dialog-copy">Checking account security…</p>
+      <div id="owner-setup-fields" hidden>
+        <label>Owner name<input id="owner-name" maxlength="120" autocomplete="name"></label>
+        <label>Owner email<input id="owner-email" type="email" maxlength="320" autocomplete="email"></label>
+        <label>Bootstrap token<input id="token-input" type="password" autocomplete="off"></label>
+      </div>
+      <p id="auth-error" class="form-error"></p>
+      <button id="setup-passkey" class="primary full" type="submit" hidden>Create owner passkey</button>
+      <button id="sign-in-passkey" class="primary full" type="submit" hidden>Sign in with passkey</button>
+    </form>
+  </dialog>
+
+  <dialog id="unlock-dialog">
+    <form method="dialog" id="unlock-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="eyebrow">LOCAL DECRYPTION</p><h2>Unlock your vault</h2>
+      <p class="dialog-copy">Your passphrase is processed here and is never sent to the API.</p>
+      <label>Vault passphrase<input id="passphrase-input" type="password" minlength="12" autocomplete="current-password" required></label>
+      <p id="unlock-error" class="form-error"></p>
+      <button class="primary full" type="submit">Unlock locally</button>
+    </form>
+  </dialog>
+
+  <dialog id="passphrase-change-dialog">
+    <form method="dialog" id="passphrase-change-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="eyebrow">ZERO-KNOWLEDGE KEY MANAGEMENT</p><h2>Change vault passphrase</h2>
+      <p class="dialog-copy">Only the encrypted vault key is replaced. Your credentials remain encrypted and never reach the server.</p>
+      <label>Current passphrase<input id="current-passphrase" type="password" minlength="12" autocomplete="current-password" required></label>
+      <label>New passphrase<input id="new-passphrase" type="password" minlength="12" autocomplete="new-password" required></label>
+      <label>Confirm new passphrase<input id="confirm-passphrase" type="password" minlength="12" autocomplete="new-password" required></label>
+      <p id="passphrase-change-error" class="form-error"></p>
+      <button class="primary full" type="submit">Rewrap vault key</button>
+    </form>
+  </dialog>
+
+  <dialog id="credential-dialog">
+    <form method="dialog" id="credential-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="eyebrow">ENCRYPTED LOCALLY</p><h2>Add credential</h2>
+      <div class="form-grid">
+        <label>Title<input id="credential-title" maxlength="100" required></label>
+        <label>Username or email<input id="credential-username" maxlength="200" required></label>
+        <label class="wide">Site URL<input id="credential-site" type="url" placeholder="https://example.com" required></label>
+        <label class="wide">Provider adapter ID<input id="credential-provider" minlength="2" maxlength="80" pattern="[A-Za-z0-9_-]+" placeholder="example" required></label>
+        <label class="wide">Password<input id="credential-password" type="password" minlength="1" required></label>
+        <label>Rotate every<select id="credential-interval"><option value="30">30 days</option><option value="60">60 days</option><option value="90">90 days</option></select></label>
+        <label>Approval<select id="credential-approval"><option value="manual">Manual</option><option value="automatic">Trusted agent</option></select></label>
+        <label id="credential-agent-field" hidden>Trusted agent<select id="credential-agent"></select></label>
+        <label id="credential-grant-field" hidden>Authorize for<select id="credential-grant-days"><option value="90">90 days</option><option value="365">1 year</option><option value="30">30 days</option></select></label>
+        <small class="form-note wide">The provider ID must match the local adapter configured on the trusted agent.</small>
+        <small id="credential-automation-note" class="form-note wide" hidden>Automatic rotation is limited to the selected active agent and expires unless renewed.</small>
+      </div>
+      <p id="credential-error" class="form-error"></p>
+      <button class="primary full" type="submit">Encrypt and save</button>
+    </form>
+  </dialog>
+  <dialog id="edit-credential-dialog">
+    <form method="dialog" id="edit-credential-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="eyebrow">ENCRYPTED LOCALLY</p><h2>Edit credential</h2>
+      <div class="form-grid">
+        <label>Title<input id="edit-credential-title" maxlength="100" required></label>
+        <label>Username or email<input id="edit-credential-username" maxlength="200" required></label>
+        <label class="wide">Site URL<input id="edit-credential-site" type="url" required></label>
+        <label class="wide">Provider adapter ID<input id="edit-credential-provider" minlength="2" maxlength="80" pattern="[A-Za-z0-9_-]+" required></label>
+        <label class="wide">Password<input id="edit-credential-password" type="password" minlength="1" autocomplete="off" required></label>
+      </div>
+      <p class="form-note">Editing is blocked while this credential has unfinished rotation work.</p>
+      <p id="edit-credential-error" class="form-error"></p>
+      <button class="primary full" type="submit">Encrypt and save changes</button>
+    </form>
+  </dialog>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

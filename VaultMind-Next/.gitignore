@@ -1,0 +1,13 @@
+.env
+.venv/
+.runtime/
+.tmp/
+.deploy/
+security-reports/
+__pycache__/
+*.py[cod]
+*.db
+.pytest_cache/
+pytest-cache-files-*/
+dist/
+*.egg-info/

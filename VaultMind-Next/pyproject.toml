@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vaultmind-next"
+version = "0.1.0"
+description = "Zero-knowledge password rotation platform foundation"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography==49.0.0",
+  "fastapi==0.139.0",
+  "pydantic==2.13.4",
+  "uvicorn[standard]==0.51.0",
+  "webauthn==2.8.0",
+]
+
+[project.optional-dependencies]
+dev = ["httpx==0.28.1", "pytest==9.1.1"]
+
+[project.scripts]
+vaultmind-agent = "vaultmind_agent.cli:main"
+vaultmind-backup = "vaultmind_next.backup:main"
+vaultmind-email-monitor = "vaultmind_next.email_monitor:main"
+vaultmind-planner = "vaultmind_next.planner:main"
+vaultmind-scheduler = "vaultmind_next.scheduler:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
