@@ -32,7 +32,7 @@ def protect_for_current_user(data: bytes) -> bytes:
     result = _DataBlob()
     crypt32 = ctypes.windll.crypt32
     if not crypt32.CryptProtectData(
-        ctypes.byref(source), "VaultMind agent device key", None, None, None,
+        ctypes.byref(source), "VaultMind local secret", None, None, None,
         0x01, ctypes.byref(result),
     ):
         raise ctypes.WinError()

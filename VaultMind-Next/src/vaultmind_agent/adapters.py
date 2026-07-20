@@ -61,10 +61,15 @@ class VerifiedRotationExecutor:
 
     def rotate(self, provider_id: str,
                credential: CredentialMaterial) -> VerifiedRotation:
+        return self.rotate_to(provider_id, credential, generate_password())
+
+    def rotate_to(self, provider_id: str, credential: CredentialMaterial,
+                  new_password: str) -> VerifiedRotation:
         adapter = self._adapters.get(provider_id)
         if adapter is None:
             return VerifiedRotation(False, error_code="provider_not_allowlisted")
-        new_password = generate_password()
+        if not 16 <= len(new_password) <= 1024:
+            return VerifiedRotation(False, error_code="new_password_invalid")
         try:
             requested_at = datetime.now(timezone.utc)
             attempt = self._normalize_attempt(
@@ -95,6 +100,26 @@ class VerifiedRotationExecutor:
             return VerifiedRotation(False, error_code="provider_request_failed")
         return VerifiedRotation(True, new_password=new_password)
 
+    def verify(self, provider_id: str, username: str, password: str) -> bool:
+        adapter = self._adapters.get(provider_id)
+        if adapter is None:
+            return False
+        try:
+            return adapter.verify_password(username, password)
+        except Exception:
+            return False
+
+    def rollback(self, provider_id: str, username: str,
+                 current_password: str, previous_password: str) -> bool:
+        adapter = self._adapters.get(provider_id)
+        if adapter is None:
+            return False
+        return self._rollback(
+            adapter,
+            CredentialMaterial(username, previous_password),
+            current_password,
+        )
+
     @staticmethod
     def _normalize_attempt(
         result: bool | PasswordChangeAttempt,
@@ -104,7 +129,7 @@ class VerifiedRotationExecutor:
         return PasswordChangeAttempt(changed=result)
 
     @classmethod
-    def _rollback(adapter: TrustedProviderAdapter,
+    def _rollback(cls, adapter: TrustedProviderAdapter,
                   old: CredentialMaterial, new_password: str) -> bool:
         try:
             attempt = cls._normalize_attempt(adapter.change_password(

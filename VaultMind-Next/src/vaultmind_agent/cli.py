@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+import time
 from uuid import uuid4
 
 from .adapters import HttpProviderAdapter, VerifiedRotationExecutor
@@ -10,7 +11,8 @@ from .client import AgentApiClient, AgentApiError
 from .config import AgentConfig, AgentPaths
 from .email_challenge import LocalEmailCodeSource, LocalEmailCredentials
 from .identity import DeviceIdentity
-from .runner import TrustedAgentRunner
+from .recovery import DpapiPendingRotationStore
+from .runner import RotationOutcome, TrustedAgentRunner
 
 
 def _adapter_values(values: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -58,7 +60,7 @@ def enroll(args: argparse.Namespace, paths: AgentPaths) -> int:
     return 0
 
 
-def run_once(paths: AgentPaths) -> int:
+def build_runner(paths: AgentPaths) -> TrustedAgentRunner:
     config = AgentConfig.load(paths.config)
     identity = DeviceIdentity.load(config.agent_id, paths.device_key)
     client = AgentApiClient(config, identity)
@@ -70,20 +72,62 @@ def run_once(paths: AgentPaths) -> int:
     if paths.email_credentials.exists():
         credentials = LocalEmailCredentials.load(paths.email_credentials)
         code_source = LocalEmailCodeSource(credentials)
-    runner = TrustedAgentRunner(
+    return TrustedAgentRunner(
         config, client, VerifiedRotationExecutor(adapters, code_source),
-        paths.pause_file,
+        paths.pause_file, DpapiPendingRotationStore(paths.pending_rotation),
     )
-    passphrase = getpass.getpass("Vault passphrase: ")
-    outcome = runner.run_once(passphrase)
+
+
+def print_outcome(outcome: RotationOutcome) -> int:
     if outcome.status == "succeeded":
         print(f"Rotation {outcome.job_id} completed and verified.")
         return 0
     if outcome.status in {"idle", "paused"}:
         print(f"Agent is {outcome.status}.")
         return 0
+    if outcome.status in {"pending", "recovery_required"}:
+        print(
+            f"Rotation {outcome.job_id} needs reconciliation: "
+            f"{outcome.error_code}.",
+            file=sys.stderr,
+        )
+        return 2
     print(f"Rotation failed safely: {outcome.error_code}.", file=sys.stderr)
     return 1
+
+
+def run_once(paths: AgentPaths) -> int:
+    runner = build_runner(paths)
+    passphrase = getpass.getpass("Vault passphrase: ")
+    try:
+        return print_outcome(runner.run_once(passphrase))
+    finally:
+        del passphrase
+
+
+def run_loop(runner: TrustedAgentRunner, passphrase: str,
+             poll_seconds: int) -> int:
+    if not 15 <= poll_seconds <= 3600:
+        raise ValueError("poll interval must be 15 to 3600 seconds")
+    while True:
+        outcome = runner.run_once(passphrase)
+        result = print_outcome(outcome)
+        if outcome.status == "recovery_required":
+            return result
+        time.sleep(poll_seconds)
+
+
+def run_forever(paths: AgentPaths, poll_seconds: int) -> int:
+    runner = build_runner(paths)
+    passphrase = getpass.getpass("Vault passphrase: ")
+    print("Trusted agent is running. Press Ctrl+C to stop.")
+    try:
+        return run_loop(runner, passphrase, poll_seconds)
+    except KeyboardInterrupt:
+        print("\nTrusted agent stopped.")
+        return 0
+    finally:
+        del passphrase
 
 
 def configure_email(args: argparse.Namespace, paths: AgentPaths) -> int:
@@ -126,6 +170,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="allowlist entry such as demo=https://adapter.example",
     )
     subparsers.add_parser("run-once")
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument("--poll-seconds", type=int, default=60)
     subparsers.add_parser("pause")
     subparsers.add_parser("resume")
     subparsers.add_parser("status")
@@ -152,6 +198,8 @@ def main() -> int:
             return enroll(args, paths)
         if args.command == "run-once":
             return run_once(paths)
+        if args.command == "run":
+            return run_forever(paths, args.poll_seconds)
         if args.command == "email-configure":
             return configure_email(args, paths)
         if args.command == "email-status":
@@ -170,7 +218,12 @@ def main() -> int:
             print("Agent resumed.")
             return 0
         config = AgentConfig.load(paths.config)
-        state = "paused" if paths.pause_file.exists() else "ready"
+        if paths.pause_file.exists():
+            state = "paused"
+        elif paths.pending_rotation.exists():
+            state = "recovery pending"
+        else:
+            state = "ready"
         print(f"{config.agent_id}: {state}; providers={config.allowed_providers}")
         return 0
     except (AgentApiError, OSError, RuntimeError, ValueError) as exc:

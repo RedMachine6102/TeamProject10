@@ -41,18 +41,21 @@ class AgentApiClient:
         return list(result)
 
     def claim(self, job_id: str, lease_seconds: int = 300) -> dict:
+        job_id = self._job_id(job_id)
         values = {"job_id": job_id, "lease_seconds": lease_seconds}
         request = self.identity.signed_request("rotation.claim", values)
         request["lease_seconds"] = lease_seconds
         return self._post(f"/api/v1/agent/jobs/{job_id}/claim", request)
 
     def package(self, job_id: str) -> dict:
+        job_id = self._job_id(job_id)
         request = self.identity.signed_request(
             "rotation.package", {"job_id": job_id}
         )
         return self._post(f"/api/v1/agent/jobs/{job_id}/package", request)
 
     def commit(self, job_id: str, envelope: dict) -> dict:
+        job_id = self._job_id(job_id)
         values = {
             "job_id": job_id, "envelope_sha256": payload_digest(envelope),
         }
@@ -61,10 +64,20 @@ class AgentApiClient:
         return self._post(f"/api/v1/agent/jobs/{job_id}/commit", request)
 
     def fail(self, job_id: str, error_code: str) -> dict:
+        job_id = self._job_id(job_id)
         values = {"job_id": job_id, "error_code": error_code}
         request = self.identity.signed_request("rotation.fail", values)
         request["error_code"] = error_code
         return self._post(f"/api/v1/agent/jobs/{job_id}/fail", request)
+
+    @staticmethod
+    def _job_id(value: str) -> str:
+        if (
+            not 8 <= len(value) <= 128
+            or not value.replace("-", "").replace("_", "").isalnum()
+        ):
+            raise AgentApiError("rotation job id is invalid")
+        return value
 
     def _post(self, path: str, body: dict,
               headers: dict[str, str] | None = None) -> dict | list:

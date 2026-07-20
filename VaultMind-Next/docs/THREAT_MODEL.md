@@ -82,6 +82,15 @@ vault records inside the rotation process. DPAPI does not stop malware already
 running as the same user. TPM-backed non-exportable keys, signed binaries,
 integrity monitoring, and revocation-on-compromise remain launch requirements.
 
+Before changing a provider password, the agent keeps one bounded
+DPAPI-protected prepared recovery record and blocks new jobs. After a restart it
+verifies whether the old or new provider login works before failing or
+committing the job. Identical signed commits are idempotent, including after the
+original lease timeout, so a lost response does not repeat the provider change.
+The record is deleted only after confirmation. It temporarily contains the old
+and new credentials, so same-user malware can still read them while the agent
+is running; DPAPI protects only the at-rest file.
+
 Optional mailbox refresh tokens are also protected with DPAPI and used only by
 the local agent. Exact sender-domain and timestamp checks reduce accidental or
 malicious code selection, but email accounts, message bodies, local process

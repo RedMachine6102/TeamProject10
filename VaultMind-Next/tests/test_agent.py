@@ -6,9 +6,15 @@ from fastapi.testclient import TestClient
 
 from vaultmind_agent.adapters import TrustedProviderAdapter, VerifiedRotationExecutor
 from vaultmind_agent.client import AgentApiClient, AgentApiError
+from vaultmind_agent.cli import run_loop
 from vaultmind_agent.config import AgentConfig
 from vaultmind_agent.identity import DeviceIdentity
-from vaultmind_agent.runner import TrustedAgentRunner
+from vaultmind_agent.recovery import (
+    DpapiPendingRotationStore,
+    PendingRotation,
+    PendingRotationStore,
+)
+from vaultmind_agent.runner import RotationOutcome, TrustedAgentRunner
 from vaultmind_agent.vault import (
     decrypt_record, derive_vault_key, encrypt_record, unwrap_vault_key,
     wrap_vault_key,
@@ -40,6 +46,20 @@ class DemoAdapter(TrustedProviderAdapter):
 
     def verify_password(self, username: str, password: str) -> bool:
         return username == "owner@example.com" and password == self.password
+
+
+class FakePendingRotationStore(PendingRotationStore):
+    def __init__(self):
+        self.pending: PendingRotation | None = None
+
+    def load(self) -> PendingRotation | None:
+        return self.pending
+
+    def save(self, pending: PendingRotation) -> None:
+        self.pending = pending
+
+    def clear(self) -> None:
+        self.pending = None
 
 
 def encrypted_demo_envelope(key: bytes | None = None, key_version: int = 1) -> dict:
@@ -100,11 +120,16 @@ def test_trusted_agent_completes_verified_atomic_rotation(tmp_path):
         server_url="http://localhost", agent_id="agent-0001",
         allowed_providers=["demo"],
     )
+    lose_first_commit_response = True
 
     def transport(path, body, headers):
+        nonlocal lose_first_commit_response
         response = api.post(path, json=body, headers=headers)
         if response.status_code >= 400:
             raise AgentApiError(f"HTTP {response.status_code}")
+        if path.endswith("/commit") and lose_first_commit_response:
+            lose_first_commit_response = False
+            raise AgentApiError("commit response was lost")
         return response.json()
 
     client = AgentApiClient(config, identity, transport)
@@ -134,11 +159,14 @@ def test_trusted_agent_completes_verified_atomic_rotation(tmp_path):
     assert jobs[0]["status"] == "approved"
 
     adapter = DemoAdapter()
+    pending_store = FakePendingRotationStore()
     runner = TrustedAgentRunner(
-        config, client, VerifiedRotationExecutor([adapter]), tmp_path / "PAUSED"
+        config, client, VerifiedRotationExecutor([adapter]), tmp_path / "PAUSED",
+        pending_store,
     )
     outcome = runner.run_once(PASSPHRASE)
     assert outcome.status == "succeeded"
+    assert pending_store.load() is None
     assert adapter.password != "old-password"
 
     saved = api.get("/api/v1/vault/items", headers=HEADERS).json()[0]
@@ -168,12 +196,181 @@ def test_agent_global_and_provider_kill_switches(tmp_path):
     runner = TrustedAgentRunner(
         config, AgentApiClient(config, identity, transport),
         VerifiedRotationExecutor([DemoAdapter()]), pause_file,
+        FakePendingRotationStore(),
     )
     assert runner.run_once(PASSPHRASE).status == "paused"
     assert calls == []
     pause_file.unlink()
     assert runner.run_once(PASSPHRASE).status == "idle"
     assert calls == ["/api/v1/agent/jobs/available"]
+
+
+def test_agent_rejects_job_ids_that_could_change_request_paths():
+    identity = DeviceIdentity.generate("agent-0001")
+    config = AgentConfig(
+        server_url="http://localhost", agent_id="agent-0001",
+        allowed_providers=["demo"],
+    )
+    client = AgentApiClient(
+        config, identity,
+        lambda path, body, headers: pytest.fail("transport must not be called"),
+    )
+    with pytest.raises(AgentApiError, match="job id"):
+        client.claim("../admin/path")
+
+
+class RecoveringClient:
+    def __init__(self):
+        self.allow_commit = False
+        self.available_calls = 0
+        self.committed_envelope: dict | None = None
+        self.failed_with: str | None = None
+
+    def available_jobs(self) -> list[dict]:
+        self.available_calls += 1
+        return [{"job_id": "pending-job-0001", "provider_id": "demo"}]
+
+    def claim(self, job_id: str) -> dict:
+        return {}
+
+    def package(self, job_id: str) -> dict:
+        return {"envelope": encrypted_demo_envelope()}
+
+    def commit(self, job_id: str, envelope: dict) -> dict:
+        if not self.allow_commit:
+            raise AgentApiError("temporary connection failure")
+        self.committed_envelope = envelope
+        return {}
+
+    def fail(self, job_id: str, error_code: str) -> dict:
+        self.failed_with = error_code
+        return {}
+
+
+def test_agent_resumes_encrypted_pending_commit_without_second_change(tmp_path):
+    config = AgentConfig(
+        server_url="http://localhost", agent_id="agent-0001",
+        allowed_providers=["demo"],
+    )
+    client = RecoveringClient()
+    adapter = DemoAdapter()
+    store = FakePendingRotationStore()
+    runner = TrustedAgentRunner(
+        config, client, VerifiedRotationExecutor([adapter]), tmp_path / "PAUSED",
+        store,
+    )
+
+    first = runner.run_once(PASSPHRASE)
+    assert first.status == "pending"
+    assert store.load() is not None
+    changed_password = adapter.password
+
+    client.allow_commit = True
+    second = runner.run_once(PASSPHRASE)
+    assert second.status == "succeeded"
+    assert store.load() is None
+    assert adapter.password == changed_password
+    assert client.available_calls == 1
+    saved = decrypt_record(
+        client.committed_envelope, derive_vault_key(PASSPHRASE, SALT)
+    )
+    assert saved["password"] == changed_password
+
+
+def test_agent_does_not_change_provider_without_recovery_record(tmp_path):
+    class FailingStore(FakePendingRotationStore):
+        def save(self, pending: PendingRotation) -> None:
+            raise OSError("storage unavailable")
+
+    config = AgentConfig(
+        server_url="http://localhost", agent_id="agent-0001",
+        allowed_providers=["demo"],
+    )
+    client = RecoveringClient()
+    adapter = DemoAdapter()
+    outcome = TrustedAgentRunner(
+        config, client, VerifiedRotationExecutor([adapter]), tmp_path / "PAUSED",
+        FailingStore(),
+    ).run_once(PASSPHRASE)
+    assert outcome.error_code == "local_recovery_store_failed"
+    assert adapter.password == "old-password"
+    assert client.failed_with == "local_recovery_store_failed"
+
+
+def test_agent_resolves_crash_during_provider_change(tmp_path):
+    new_password = "New-password-value-123!"
+    key = derive_vault_key(PASSPHRASE, SALT)
+    original = encrypted_demo_envelope()
+    record = decrypt_record(original, key)
+    rotated = encrypt_record(
+        original, record | {"password": new_password}, key
+    )
+    store = FakePendingRotationStore()
+    store.save(PendingRotation(
+        stage="prepared",
+        job_id="pending-job-0001",
+        provider_id="demo",
+        username="owner@example.com",
+        old_password="old-password",
+        new_password=new_password,
+        envelope=rotated,
+    ))
+    client = RecoveringClient()
+    client.allow_commit = True
+    config = AgentConfig(
+        server_url="http://localhost", agent_id="agent-0001",
+        allowed_providers=["demo"],
+    )
+    outcome = TrustedAgentRunner(
+        config, client,
+        VerifiedRotationExecutor([DemoAdapter(new_password)]),
+        tmp_path / "PAUSED", store,
+    ).run_once(PASSPHRASE)
+    assert outcome.status == "succeeded"
+    assert store.load() is None
+    assert client.available_calls == 0
+
+
+def test_foreground_agent_stops_when_manual_recovery_is_required(monkeypatch):
+    class SequenceRunner:
+        def __init__(self):
+            self.outcomes = [
+                RotationOutcome("idle"),
+                RotationOutcome(
+                    "recovery_required", "pending-job-0001",
+                    "provider_state_could_not_be_verified",
+                ),
+            ]
+
+        def run_once(self, passphrase: str) -> RotationOutcome:
+            return self.outcomes.pop(0)
+
+    monkeypatch.setattr("vaultmind_agent.cli.time.sleep", lambda seconds: None)
+    assert run_loop(SequenceRunner(), PASSPHRASE, 15) == 2
+    with pytest.raises(ValueError, match="poll interval"):
+        run_loop(SequenceRunner(), PASSPHRASE, 5)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI test")
+def test_pending_rotation_is_protected_by_windows_account(tmp_path):
+    path = tmp_path / "pending-rotation.dat"
+    pending = PendingRotation(
+        stage="provider_changed",
+        job_id="pending-job-0001",
+        provider_id="demo",
+        username="owner@example.com",
+        old_password="old-password",
+        new_password="New-password-value-123!",
+        envelope=encrypted_demo_envelope(),
+    )
+    store = DpapiPendingRotationStore(path)
+    store.save(pending)
+    protected = path.read_bytes()
+    assert pending.old_password.encode() not in protected
+    assert pending.new_password.encode() not in protected
+    assert store.load() == pending
+    store.clear()
+    assert not path.exists()
 
 
 def test_demo_provider_changes_and_verifies_without_storing_plaintext():

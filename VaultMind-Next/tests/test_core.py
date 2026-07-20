@@ -88,10 +88,27 @@ def test_storage_creates_one_due_job_and_advances_after_success(tmp_path):
         "nonce": "YWJjZGVmZ2hpamts",
         "ciphertext": "bmV3LWNpcGhlcnRleHQtYXV0aC10YWc=",
     })
+    with database._connection:
+        database._connection.execute(
+            "UPDATE rotation_jobs SET lease_expires_at=? WHERE job_id=?",
+            (
+                (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+                jobs[0].job_id,
+            ),
+        )
     committed = database.commit_agent_rotation(
         jobs[0].job_id, "agent-0001", rotated
     )
     assert committed.job.status is JobStatus.SUCCEEDED
+    repeated = database.commit_agent_rotation(
+        jobs[0].job_id, "agent-0001", rotated
+    )
+    assert repeated.envelope.ciphertext == rotated.ciphertext
+    with pytest.raises(ValueError, match="different result"):
+        database.commit_agent_rotation(
+            jobs[0].job_id, "agent-0001",
+            rotated.model_copy(update={"nonce": "cXdlcnR5dWlvcGFz"}),
+        )
     assert database.list_policies()[0].next_due_at > datetime.now(timezone.utc)
     verification = database.verify_audit_chain()
     assert verification.valid and verification.events_checked == 7

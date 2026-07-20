@@ -86,3 +86,7 @@ class AgentPaths:
     @property
     def email_credentials(self) -> Path:
         return self.directory / "email-credentials.dat"
+
+    @property
+    def pending_rotation(self) -> Path:
+        return self.directory / "pending-rotation.dat"

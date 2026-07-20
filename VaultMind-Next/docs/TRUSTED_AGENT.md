@@ -14,6 +14,12 @@ OAuth token, provider session, or device signing key.
   only after the agent owns an unexpired job lease.
 - The agent unwraps the data key locally, changes the provider password, and
   verifies the new login before it re-encrypts the vault record.
+- Before contacting the provider, the agent writes a DPAPI-protected prepared
+  recovery record containing the pending encrypted vault update and the
+  credentials needed to reconcile an interruption. It marks the record changed
+  only after verifying the new provider login. The server accepts an identical
+  signed commit more than once, and the agent removes the record only after a
+  confirmed response.
 - The API commits the new encrypted record, successful job state, audit events,
   and next rotation date in one SQLite transaction.
 - A global `PAUSED` file and a provider allowlist stop execution before any job
@@ -52,7 +58,21 @@ Run at most one job:
 vaultmind-agent run-once
 ```
 
+Or keep the agent visible in the foreground so approved due jobs run
+automatically:
+
+```powershell
+vaultmind-agent run --poll-seconds 60
+```
+
+The foreground process asks for the vault passphrase once and retains it in
+process memory until stopped. It does not write the passphrase to disk. Stop the
+process when the device is unattended; a signed Windows service with a
+TPM-backed vault key remains a production requirement.
+
 Use `vaultmind-agent pause`, `resume`, and `status` for the global kill switch.
+The status command reports `recovery pending` when an interrupted provider
+change must be committed before another job can start.
 
 ## Email verification challenges
 

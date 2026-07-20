@@ -1046,12 +1046,34 @@ class Database:
             ).fetchone()
             if job_row is None:
                 raise KeyError("rotation job does not exist")
+            if job_row["status"] == JobStatus.SUCCEEDED.value:
+                item_row = self._connection.execute(
+                    """SELECT envelope, created_at, updated_at FROM vault_items
+                       WHERE item_id=?""",
+                    (job_row["item_id"],),
+                ).fetchone()
+                completed = self._connection.execute(
+                    """SELECT actor_id FROM audit_events
+                       WHERE action='rotation.job_succeeded' AND target_id=?
+                       ORDER BY sequence DESC LIMIT 1""",
+                    (job_id,),
+                ).fetchone()
+                current = VaultEnvelope(**json.loads(item_row["envelope"]))
+                if (
+                    completed is not None
+                    and completed["actor_id"] == agent_id
+                    and current == envelope
+                ):
+                    return RotationCommitResult(
+                        job=self._job_from_row(job_row),
+                        envelope=self._envelope_from_row(item_row),
+                    )
+                raise ValueError(
+                    "rotation is already completed with a different result"
+                )
             if (job_row["status"] != JobStatus.RUNNING.value
                     or job_row["lease_owner"] != agent_id):
                 raise PermissionError("rotation job is not leased to this agent")
-            if (not job_row["lease_expires_at"]
-                    or _time(job_row["lease_expires_at"]) <= now):
-                raise PermissionError("rotation job lease expired")
             if envelope.item_id != job_row["item_id"]:
                 raise ValueError("rotated envelope does not match the job item")
 
@@ -1191,8 +1213,6 @@ class Database:
                 raise KeyError("rotation job does not exist")
             if row["lease_owner"] != agent_id:
                 raise PermissionError("job is leased to a different agent")
-            if not row["lease_expires_at"] or _time(row["lease_expires_at"]) <= now:
-                raise PermissionError("job lease expired")
             result = self.transition_job(job_id, target, error_code, actor_id=agent_id)
             with self._connection:
                 self._connection.execute(
