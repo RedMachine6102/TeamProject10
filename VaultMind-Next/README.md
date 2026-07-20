@@ -32,6 +32,7 @@ being built as a zero-knowledge vault and controlled password-rotation platform.
 - Automatic shutdown of deployment-token API access after owner setup
 - Responsive security dashboard
 - Browser-side AES-GCM encryption with a random vault data key
+- Explicit local reveal, edit, and confirmed-delete controls for unlocked items
 - Zero-knowledge passphrase changes that only rewrap the vault data key
 - Five-minute inactivity lock and immediate lock when the browser is backgrounded
 - Authenticated encrypted backups with automatic retention and restore drills

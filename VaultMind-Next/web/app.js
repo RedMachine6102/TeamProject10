@@ -1,6 +1,7 @@
 const connectDialog = document.querySelector("#connect-dialog");
 const unlockDialog = document.querySelector("#unlock-dialog");
 const credentialDialog = document.querySelector("#credential-dialog");
+const editCredentialDialog = document.querySelector("#edit-credential-dialog");
 const tokenInput = document.querySelector("#token-input");
 let apiToken = "";
 let isAuthenticated = false;
@@ -9,6 +10,8 @@ let vaultKey = null;
 let vaultKeyBytes = null;
 let vaultItemSalt = null;
 let vaultLockTimer = null;
+let editingVaultItem = null;
+const decryptedVaultRecords = new Map();
 const VAULT_IDLE_MILLISECONDS = 5 * 60 * 1000;
 
 async function api(path, options = {}) {
@@ -309,6 +312,10 @@ function lockVault() {
   vaultKeyBytes = null;
   vaultKey = null;
   vaultItemSalt = null;
+  decryptedVaultRecords.clear();
+  editingVaultItem = null;
+  document.querySelector("#edit-credential-form").reset();
+  if (editCredentialDialog.open) editCredentialDialog.close();
   document.querySelector("#passphrase-input").value = "";
   document.querySelector("#current-passphrase").value = "";
   document.querySelector("#new-passphrase").value = "";
@@ -392,9 +399,33 @@ document.querySelector("#job-list").addEventListener("click", async event => {
   }
 });
 
+function validatedCredentialSite(value) {
+  const site = new URL(value);
+  if (site.protocol !== "https:") {
+    throw new Error("The site URL must use HTTPS.");
+  }
+  if (site.username || site.password) {
+    throw new Error("The site URL cannot contain a username or password.");
+  }
+  return site;
+}
+
+function validatedProviderId(value) {
+  const provider = value.trim().toLowerCase();
+  if (!/^[a-z0-9_-]{2,80}$/.test(provider)) {
+    throw new Error(
+      "The provider adapter ID must use 2–80 letters, numbers, hyphens, or underscores."
+    );
+  }
+  return provider;
+}
+
 async function loadVault() {
   const container = document.querySelector("#vault-list");
+  const error = document.querySelector("#vault-error");
   try {
+    decryptedVaultRecords.clear();
+    error.textContent = "";
     const items = await api("/api/v1/vault/items");
     if (!items.length) {
       container.className = "empty-state";
@@ -409,18 +440,117 @@ async function loadVault() {
         return { item, data: null };
       }
     }));
+    for (const record of records) {
+      if (record.data) decryptedVaultRecords.set(record.item.item_id, record);
+    }
     container.className = "";
     container.innerHTML = records.map(({ item, data }) => `
-      <div class="vault-row"><div><strong>${escapeText(data?.title || "Encrypted item")}</strong>
+      <div class="vault-row" data-item-id="${escapeAttribute(item.item_id)}"><div><strong>${escapeText(data?.title || "Encrypted item")}</strong>
       <small>${escapeText(data?.username || "Unlock locally to view")}</small></div>
       <span class="site">${escapeText(item.site_origin)}</span>
+      <span class="password-value">${data ? "••••••••••••" : "ENCRYPTED"}</span>
       <span class="site">${new Date(item.updated_at).toLocaleDateString()}</span>
-      <span class="lock-label">${data ? "UNLOCKED" : "ENCRYPTED"}</span></div>
+      <div class="vault-actions">
+        <button class="secondary vault-action" data-action="reveal" data-item-id="${escapeAttribute(item.item_id)}" ${data ? "" : "disabled"}>Reveal</button>
+        <button class="secondary vault-action" data-action="edit" data-item-id="${escapeAttribute(item.item_id)}" ${data ? "" : "disabled"}>Edit</button>
+        <button class="danger vault-action" data-action="delete" data-item-id="${escapeAttribute(item.item_id)}" ${data ? "" : "disabled"}>Delete</button>
+      </div></div>
     `).join("");
-  } catch (error) {
-    showError(container, error.message);
+  } catch (caught) {
+    showError(container, caught.message);
   }
 }
+
+document.querySelector("#vault-list").addEventListener("click", async event => {
+  const button = event.target.closest("button.vault-action");
+  if (!button || !vaultKey) return;
+  const record = decryptedVaultRecords.get(button.dataset.itemId);
+  if (!record) return;
+  scheduleVaultLock();
+  const error = document.querySelector("#vault-error");
+  error.textContent = "";
+
+  if (button.dataset.action === "reveal") {
+    const password = button.closest(".vault-row").querySelector(".password-value");
+    const reveal = button.textContent === "Reveal";
+    password.textContent = reveal ? record.data.password : "••••••••••••";
+    button.textContent = reveal ? "Hide" : "Reveal";
+    return;
+  }
+  if (button.dataset.action === "edit") {
+    editingVaultItem = record.item;
+    document.querySelector("#edit-credential-title").value = record.data.title;
+    document.querySelector("#edit-credential-username").value = record.data.username;
+    document.querySelector("#edit-credential-site").value = record.item.site_origin;
+    document.querySelector("#edit-credential-provider").value =
+      record.item.provider_id;
+    document.querySelector("#edit-credential-password").value =
+      record.data.password;
+    editCredentialDialog.showModal();
+    return;
+  }
+  if (button.dataset.action !== "delete") return;
+  if (!window.confirm(
+    `Delete ${record.data.title}? This cannot be undone.`
+  )) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/v1/vault/items/${encodeURIComponent(record.item.item_id)}`,
+      { method: "DELETE" },
+    );
+    decryptedVaultRecords.delete(record.item.item_id);
+    await Promise.all([loadVault(), refreshOverview(), loadRotations()]);
+  } catch (caught) {
+    button.disabled = false;
+    error.textContent = caught.message;
+  }
+});
+
+document.querySelector("#edit-credential-form").addEventListener(
+  "submit", async event => {
+    event.preventDefault();
+    const error = document.querySelector("#edit-credential-error");
+    try {
+      if (!vaultKey || !editingVaultItem) {
+        throw new Error("Unlock the vault before editing a credential.");
+      }
+      const site = validatedCredentialSite(
+        document.querySelector("#edit-credential-site").value
+      );
+      const provider = validatedProviderId(
+        document.querySelector("#edit-credential-provider").value
+      );
+      const encrypted = await encryptWithKey(vaultKey, {
+        title: document.querySelector("#edit-credential-title").value.trim(),
+        username: document.querySelector(
+          "#edit-credential-username"
+        ).value.trim(),
+        password: document.querySelector("#edit-credential-password").value,
+      });
+      await api("/api/v1/vault/items", {
+        method: "PUT",
+        body: JSON.stringify({
+          item_id: editingVaultItem.item_id,
+          provider_id: provider,
+          site_origin: site.origin,
+          kdf_salt: editingVaultItem.kdf_salt,
+          nonce: encrypted.nonce,
+          ciphertext: encrypted.ciphertext,
+          key_version: editingVaultItem.key_version,
+        }),
+      });
+      editingVaultItem = null;
+      event.target.reset();
+      error.textContent = "";
+      editCredentialDialog.close();
+      await loadVault();
+      await refreshOverview();
+    } catch (caught) {
+      error.textContent = caught.message;
+    }
+  }
+);
 
 async function loadRotations() {
   const policyList = document.querySelector("#policy-list");
@@ -707,16 +837,12 @@ document.querySelector("#credential-form").addEventListener("submit", async even
   let itemId = null;
   let itemCreated = false;
   try {
-    const site = new URL(document.querySelector("#credential-site").value);
-    if (site.protocol !== "https:") throw new Error("The site URL must use HTTPS.");
-    const provider = document.querySelector(
-      "#credential-provider"
-    ).value.trim().toLowerCase();
-    if (!/^[a-z0-9_-]{2,80}$/.test(provider)) {
-      throw new Error(
-        "The provider adapter ID must use 2–80 letters, numbers, hyphens, or underscores."
-      );
-    }
+    const site = validatedCredentialSite(
+      document.querySelector("#credential-site").value
+    );
+    const provider = validatedProviderId(
+      document.querySelector("#credential-provider").value
+    );
     const approvalMode = credentialApproval.value;
     const agentId = credentialAgent.value;
     if (approvalMode === "automatic" && !agentId) {
@@ -839,6 +965,18 @@ async function activateView(view) {
 document.querySelectorAll(".nav-item").forEach(button => button.addEventListener("click", async () => {
   await activateView(button.dataset.view);
 }));
+
+document.querySelectorAll(".dialog-close").forEach(button => {
+  button.addEventListener("click", event => {
+    event.preventDefault();
+    button.closest("dialog").close();
+  });
+});
+editCredentialDialog.addEventListener("close", () => {
+  editingVaultItem = null;
+  document.querySelector("#edit-credential-form").reset();
+  document.querySelector("#edit-credential-error").textContent = "";
+});
 
 for (const eventName of ["pointerdown", "keydown"]) {
   document.addEventListener(eventName, scheduleVaultLock, { passive: true });

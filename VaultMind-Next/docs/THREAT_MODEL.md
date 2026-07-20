@@ -118,10 +118,11 @@ defense-in-depth controls.
 
 The browser reduces that exposure by locking after five minutes of inactivity
 and immediately on background or unload. Locking clears decrypted DOM content,
-passphrase fields, and retained key bytes before dropping the CryptoKey
-reference. The owner can revoke all browser sessions and remove a device's
-automation authority, but these controls do not defeat malware already reading
-the active process.
+revealed passwords, edit forms, passphrase fields, and retained key bytes before
+dropping the CryptoKey reference. Passwords are never placed in HTML data
+attributes or copied automatically. The owner can revoke all browser sessions
+and remove a device's automation authority, but these controls do not defeat
+malware already reading the active process.
 
 ## Launch gates
 

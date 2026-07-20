@@ -171,6 +171,31 @@ def test_owner_can_cancel_waiting_rotation(tmp_path):
     ).status_code == 409
 
 
+def test_idle_vault_item_can_be_updated_and_deleted(tmp_path):
+    client = TestClient(create_app(str(tmp_path / "item-crud.db"), TOKEN))
+    item = sample_item()
+    assert client.put(
+        "/api/v1/vault/items", json=item, headers=HEADERS
+    ).status_code == 200
+    updated = item | {
+        "provider_id": "updated",
+        "site_origin": "https://updated.example",
+        "nonce": "YWJjZGVmZ2hpamts",
+        "ciphertext": "bmV3LWNpcGhlcnRleHQtYXV0aC10YWc=",
+    }
+    response = client.put(
+        "/api/v1/vault/items", json=updated, headers=HEADERS
+    )
+    assert response.status_code == 200
+    assert response.json()["provider_id"] == "updated"
+    assert client.delete(
+        f"/api/v1/vault/items/{item['item_id']}", headers=HEADERS
+    ).status_code == 204
+    assert client.get(
+        "/api/v1/vault/items", headers=HEADERS
+    ).json() == []
+
+
 def test_vault_item_cannot_change_during_unfinished_rotation(tmp_path):
     client = TestClient(create_app(str(tmp_path / "item-guard.db"), TOKEN))
     item = sample_item()

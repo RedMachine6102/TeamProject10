@@ -66,7 +66,7 @@
         <div class="section-heading"><div><p class="eyebrow">ZERO-KNOWLEDGE</p><h2>Encrypted vault</h2></div>
           <div class="header-actions"><span id="vault-lock-state" class="pill offline">Locked</span>
             <button id="unlock-button" class="secondary">Unlock locally</button></div></div>
-        <article class="panel"><div id="vault-list" class="empty-state">Connect and unlock to load vault items.</div></article>
+        <article class="panel"><p id="vault-error" class="form-error"></p><div id="vault-list" class="empty-state">Connect and unlock to load vault items.</div></article>
       </section>
 
       <section id="rotations" class="view">
@@ -161,6 +161,22 @@
       </div>
       <p id="credential-error" class="form-error"></p>
       <button class="primary full" type="submit">Encrypt and save</button>
+    </form>
+  </dialog>
+  <dialog id="edit-credential-dialog">
+    <form method="dialog" id="edit-credential-form">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="eyebrow">ENCRYPTED LOCALLY</p><h2>Edit credential</h2>
+      <div class="form-grid">
+        <label>Title<input id="edit-credential-title" maxlength="100" required></label>
+        <label>Username or email<input id="edit-credential-username" maxlength="200" required></label>
+        <label class="wide">Site URL<input id="edit-credential-site" type="url" required></label>
+        <label class="wide">Provider adapter ID<input id="edit-credential-provider" minlength="2" maxlength="80" pattern="[A-Za-z0-9_-]+" required></label>
+        <label class="wide">Password<input id="edit-credential-password" type="password" minlength="1" autocomplete="off" required></label>
+      </div>
+      <p class="form-note">Editing is blocked while this credential has unfinished rotation work.</p>
+      <p id="edit-credential-error" class="form-error"></p>
+      <button class="primary full" type="submit">Encrypt and save changes</button>
     </form>
   </dialog>
   <script src="/assets/app.js"></script>
