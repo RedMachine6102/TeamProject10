@@ -97,10 +97,11 @@ committing a password change. When local email access is configured, the agent
 retrieves the code directly from Google or Microsoft and submits it directly to
 the adapter. The backend never receives the OAuth token, message body, or code.
 
-Configure the local mailbox with `vaultmind-agent email-configure`, inspect the
-non-secret settings with `email-status`, and remove them with
-`email-disconnect`. See [EMAIL_CHALLENGES.md](EMAIL_CHALLENGES.md) for scope,
-sender allowlists, and setup details.
+Connect the local mailbox with the system-browser
+`vaultmind-agent email-connect` flow, inspect the non-secret settings with
+`email-status`, and remove them with `email-disconnect`. See
+[EMAIL_CHALLENGES.md](EMAIL_CHALLENGES.md) for scope, sender allowlists, and
+setup details.
 
 ## Isolated demo provider
 

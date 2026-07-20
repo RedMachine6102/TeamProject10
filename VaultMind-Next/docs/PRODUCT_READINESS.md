@@ -13,7 +13,7 @@ marketing claims.
 | 30/60/90-day scheduling | Working foundation | Web policy controls, active-agent grant enforcement, queue, lease, and transition tests |
 | Trusted-agent authorization | Working foundation | Device signatures, nonce replay rejection, scoped grants |
 | Email account linking | Working foundation | OAuth code + PKCE integration test, encrypted token storage, revocation |
-| Email verification challenges | Working foundation | Local-only OAuth storage, bounded mailbox reads, exact sender/time checks, ambiguity rejection, and provider challenge tests |
+| Email verification challenges | Working foundation | Native loopback OAuth with PKCE/state, DPAPI token storage, bounded reads, exact sender/time checks, and challenge tests |
 | Email security monitoring | Working foundation | Bounded metadata requests, token refresh, sanitization and deduplication tests |
 | AI planning boundary | Working foundation | Sanitized-only input, strict schema, stateless request, no approval/execution fields |
 | Deployed backend | Working foundation | Hardened VM 101 services with persistent data and HTTPS ingress |

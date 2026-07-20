@@ -99,6 +99,12 @@ read a token or challenge code while the agent is running. The backend cannot
 use mailbox access to authorize a rotation because it never receives that
 access.
 
+Mailbox authorization uses the system browser rather than an embedded view.
+The local listener binds only to loopback, accepts one bounded authorization
+response, validates a random state value, and uses a one-time PKCE verifier.
+This reduces interception and request-forgery risk but does not protect a
+mailbox already controlled by an attacker or a fully compromised local user.
+
 Vault records use a random data key. The server stores that key only as an
 AES-GCM envelope protected by a passphrase-derived wrapping key, so database or
 backup disclosure does not reveal it. Passphrase changes replace the envelope

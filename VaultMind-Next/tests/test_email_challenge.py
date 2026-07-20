@@ -19,11 +19,17 @@ from vaultmind_next.automation import CredentialMaterial
 
 
 class FakeMailboxClient:
-    def __init__(self, messages: list[EmailMessage]):
+    def __init__(
+        self, messages: list[EmailMessage],
+        new_refresh_token: str | None = None,
+    ):
         self.messages = messages
+        self.new_refresh_token = new_refresh_token
 
-    def refresh_access_token(self, credentials: LocalEmailCredentials) -> str:
-        return "local-test-access-token-value"
+    def refresh_access_token(
+        self, credentials: LocalEmailCredentials,
+    ) -> tuple[str, str | None]:
+        return "local-test-access-token-value", self.new_refresh_token
 
     def recent_messages(self, provider: str, access_token: str,
                         received_after: datetime) -> list[EmailMessage]:
@@ -128,6 +134,27 @@ def test_email_code_source_requires_timezone():
         source.get_code("demo", datetime.now())
 
 
+def test_email_code_source_keeps_rotated_refresh_token():
+    credentials = email_credentials()
+    replacement = "replacement-refresh-token-value-long-enough"
+    source = LocalEmailCodeSource(
+        credentials,
+        FakeMailboxClient(
+            [EmailMessage(
+                "notice@accounts.example",
+                datetime.now(timezone.utc),
+                "Your verification code is 482951.",
+            )],
+            new_refresh_token=replacement,
+        ),
+        timeout_seconds=10,
+    )
+    assert source.get_code(
+        "demo", datetime.now(timezone.utc) - timedelta(seconds=1)
+    ) == "482951"
+    assert credentials.refresh_token == replacement
+
+
 def test_rotation_completes_email_challenge_before_verification():
     adapter = ChallengeAdapter()
     result = VerifiedRotationExecutor(
@@ -195,3 +222,29 @@ def test_email_credentials_are_protected_by_windows_account(tmp_path):
     credentials.save(path)
     assert credentials.refresh_token.encode() not in path.read_bytes()
     assert LocalEmailCredentials.load(path) == credentials
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows DPAPI test")
+def test_rotated_refresh_token_replaces_protected_file(tmp_path):
+    path = tmp_path / "email-credentials.dat"
+    credentials = email_credentials()
+    credentials.save(path)
+    replacement = "replacement-refresh-token-value-long-enough"
+    source = LocalEmailCodeSource(
+        credentials,
+        FakeMailboxClient(
+            [EmailMessage(
+                "notice@accounts.example",
+                datetime.now(timezone.utc),
+                "Your verification code is 482951.",
+            )],
+            new_refresh_token=replacement,
+        ),
+        timeout_seconds=10,
+        credential_path=path,
+    )
+    assert source.get_code(
+        "demo", datetime.now(timezone.utc) - timedelta(seconds=1)
+    ) == "482951"
+    assert replacement.encode() not in path.read_bytes()
+    assert LocalEmailCredentials.load(path).refresh_token == replacement

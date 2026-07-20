@@ -38,6 +38,23 @@ def _sender_domain(sender: str) -> str:
     return address.rsplit("@", 1)[-1] if "@" in address else ""
 
 
+def normalize_sender_domains(
+    sender_domains: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    normalized: dict[str, list[str]] = {}
+    for rotation_provider, domains in sender_domains.items():
+        provider_id = rotation_provider.lower()
+        if not provider_id.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("rotation provider id is invalid")
+        values = sorted(set(domain.lower() for domain in domains))
+        if not values or not all(_valid_domain(domain) for domain in values):
+            raise ValueError("sender domain allowlist is invalid")
+        normalized[provider_id] = values
+    if not normalized:
+        raise ValueError("at least one sender domain is required")
+    return normalized
+
+
 @dataclass
 class LocalEmailCredentials:
     provider: str
@@ -52,18 +69,7 @@ class LocalEmailCredentials:
             raise ValueError("unsupported local email provider")
         if len(self.client_id) < 8 or len(self.refresh_token) < 20:
             raise ValueError("local email credentials are incomplete")
-        normalized: dict[str, list[str]] = {}
-        for rotation_provider, domains in self.sender_domains.items():
-            provider_id = rotation_provider.lower()
-            if not provider_id.replace("-", "").replace("_", "").isalnum():
-                raise ValueError("rotation provider id is invalid")
-            values = sorted(set(domain.lower() for domain in domains))
-            if not values or not all(_valid_domain(domain) for domain in values):
-                raise ValueError("sender domain allowlist is invalid")
-            normalized[provider_id] = values
-        if not normalized:
-            raise ValueError("at least one sender domain is required")
-        self.sender_domains = normalized
+        self.sender_domains = normalize_sender_domains(self.sender_domains)
 
     def save(self, path: Path) -> None:
         raw = json.dumps(asdict(self), separators=(",", ":")).encode("utf-8")
@@ -106,7 +112,41 @@ class _TextExtractor(HTMLParser):
 
 
 class MailboxClient:
-    def refresh_access_token(self, credentials: LocalEmailCredentials) -> str:
+    def exchange_authorization_code(
+        self, provider: str, client_id: str, client_secret: str,
+        code: str, verifier: str, redirect_uri: str,
+    ) -> str:
+        if provider == "google":
+            url = "https://oauth2.googleapis.com/token"
+            scope = ""
+        elif provider == "microsoft":
+            url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+            scope = (
+                "openid email offline_access "
+                "https://graph.microsoft.com/Mail.Read"
+            )
+        else:
+            raise ValueError("unsupported local email provider")
+        form = {
+            "client_id": client_id,
+            "code": code,
+            "code_verifier": verifier,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+        }
+        if client_secret:
+            form["client_secret"] = client_secret
+        if scope:
+            form["scope"] = scope
+        result = self._request_json(url, form=form)
+        refresh_token = str(result.get("refresh_token", ""))
+        if len(refresh_token) < 20:
+            raise ValueError("email provider did not return a refresh token")
+        return refresh_token
+
+    def refresh_access_token(
+        self, credentials: LocalEmailCredentials,
+    ) -> tuple[str, str | None]:
         if credentials.provider == "google":
             url = "https://oauth2.googleapis.com/token"
             scope = ""
@@ -126,7 +166,10 @@ class MailboxClient:
         access_token = str(result.get("access_token", ""))
         if len(access_token) < 20:
             raise ValueError("email provider did not return an access token")
-        return access_token
+        refresh_token = str(result.get("refresh_token", ""))
+        if refresh_token and len(refresh_token) < 20:
+            raise ValueError("email provider returned an invalid refresh token")
+        return access_token, refresh_token or None
 
     def recent_messages(self, provider: str, access_token: str,
                         received_after: datetime) -> list[EmailMessage]:
@@ -265,12 +308,14 @@ class MailboxClient:
 class LocalEmailCodeSource:
     def __init__(self, credentials: LocalEmailCredentials,
                  client: MailboxClient | None = None,
-                 timeout_seconds: int = 120):
+                 timeout_seconds: int = 120,
+                 credential_path: Path | None = None):
         if not 10 <= timeout_seconds <= 300:
             raise ValueError("email challenge timeout must be 10 to 300 seconds")
         self.credentials = credentials
         self.client = client or MailboxClient()
         self.timeout_seconds = timeout_seconds
+        self.credential_path = credential_path
 
     def get_code(self, rotation_provider: str,
                  requested_after: datetime) -> str | None:
@@ -286,7 +331,23 @@ class LocalEmailCodeSource:
             requested_after.astimezone(timezone.utc),
             now - timedelta(minutes=5),
         )
-        access_token = self.client.refresh_access_token(self.credentials)
+        access_token, new_refresh_token = self.client.refresh_access_token(
+            self.credentials
+        )
+        if (
+            new_refresh_token
+            and new_refresh_token != self.credentials.refresh_token
+        ):
+            old_refresh_token = self.credentials.refresh_token
+            self.credentials.refresh_token = new_refresh_token
+            try:
+                if self.credential_path is not None:
+                    self.credentials.save(self.credential_path)
+            except Exception:
+                self.credentials.refresh_token = old_refresh_token
+                raise
+            finally:
+                del old_refresh_token
         deadline = time.monotonic() + self.timeout_seconds
         while time.monotonic() < deadline:
             found: set[str] = set()

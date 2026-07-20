@@ -10,6 +10,7 @@ from .adapters import HttpProviderAdapter, VerifiedRotationExecutor
 from .client import AgentApiClient, AgentApiError
 from .config import AgentConfig, AgentPaths
 from .email_challenge import LocalEmailCodeSource, LocalEmailCredentials
+from .email_oauth import NativeMailboxOAuth
 from .identity import DeviceIdentity
 from .recovery import DpapiPendingRotationStore
 from .runner import RotationOutcome, TrustedAgentRunner
@@ -71,7 +72,9 @@ def build_runner(paths: AgentPaths) -> TrustedAgentRunner:
     code_source = None
     if paths.email_credentials.exists():
         credentials = LocalEmailCredentials.load(paths.email_credentials)
-        code_source = LocalEmailCodeSource(credentials)
+        code_source = LocalEmailCodeSource(
+            credentials, credential_path=paths.email_credentials
+        )
     return TrustedAgentRunner(
         config, client, VerifiedRotationExecutor(adapters, code_source),
         paths.pause_file, DpapiPendingRotationStore(paths.pending_rotation),
@@ -145,6 +148,21 @@ def configure_email(args: argparse.Namespace, paths: AgentPaths) -> int:
     return 0
 
 
+def connect_email(args: argparse.Namespace, paths: AgentPaths) -> int:
+    credentials = NativeMailboxOAuth().connect(
+        provider=args.mail_provider,
+        client_id=args.client_id.strip(),
+        client_secret=getpass.getpass(
+            "OAuth client secret (leave blank for a public client): "
+        ),
+        sender_domains=_sender_domain_values(args.sender_domain),
+        timeout_seconds=args.timeout_seconds,
+    )
+    credentials.save(paths.email_credentials)
+    print("Local email verification connected and protected.")
+    return 0
+
+
 def email_status(paths: AgentPaths) -> int:
     if not paths.email_credentials.exists():
         print("Local email verification is not configured.")
@@ -175,6 +193,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("pause")
     subparsers.add_parser("resume")
     subparsers.add_parser("status")
+    connect_parser = subparsers.add_parser("email-connect")
+    connect_parser.add_argument(
+        "--mail-provider", required=True, choices=["google", "microsoft"]
+    )
+    connect_parser.add_argument("--client-id", required=True)
+    connect_parser.add_argument(
+        "--sender-domain", action="append", required=True,
+        help="allowlist entry such as demo=accounts.example",
+    )
+    connect_parser.add_argument("--timeout-seconds", type=int, default=180)
     email_parser = subparsers.add_parser("email-configure")
     email_parser.add_argument(
         "--mail-provider", required=True, choices=["google", "microsoft"]
@@ -200,6 +228,8 @@ def main() -> int:
             return run_once(paths)
         if args.command == "run":
             return run_forever(paths, args.poll_seconds)
+        if args.command == "email-connect":
+            return connect_email(args, paths)
         if args.command == "email-configure":
             return configure_email(args, paths)
         if args.command == "email-status":

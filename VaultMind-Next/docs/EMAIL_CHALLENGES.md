@@ -36,20 +36,29 @@ retrieval.
 
 ## Local setup
 
-Create a Google or Microsoft OAuth application with a loopback/native-client
-configuration and the narrow mailbox scope described above. Obtain a refresh
-token through that provider's authorization flow, then configure the agent:
+Create a Google **Desktop app** OAuth client or a Microsoft
+**Mobile and desktop application** registration with its system-browser
+loopback redirect enabled. Then connect the agent:
 
 ```powershell
-vaultmind-agent email-configure `
+vaultmind-agent email-connect `
   --mail-provider google `
   --client-id "your-oauth-client-id" `
   --sender-domain demo=accounts.example
 ```
 
-The client secret and refresh token use hidden prompts and are never accepted as
-command-line arguments. The encrypted file is stored beside the agent
-configuration under `%LOCALAPPDATA%\VaultMind\Agent`. Use:
+The agent opens the system browser and uses an authorization-code flow with a
+random state value, PKCE S256, a random loopback port, and a three-minute
+timeout. It requests only the mailbox-read and offline scopes required for
+local challenge retrieval. The authorization code and tokens are never printed.
+An optional client secret uses a hidden prompt and is never accepted as a
+command-line argument.
+
+After the provider returns a refresh token, the agent protects it with Windows
+DPAPI and stores the encrypted file beside the agent configuration under
+`%LOCALAPPDATA%\VaultMind\Agent`. If the provider rotates that token during a
+refresh, the replacement is atomically protected before mailbox processing
+continues. Use:
 
 ```powershell
 vaultmind-agent email-status
@@ -57,7 +66,6 @@ vaultmind-agent email-disconnect
 ```
 
 The status command displays only the mail provider and sender-domain allowlist.
-It does not display OAuth credentials. The initial provider authorization and
-consent flow is intentionally separate in this engineering build; a production
-installer must provide a reviewed native OAuth flow rather than asking users to
-handle refresh tokens.
+It does not display OAuth credentials. `email-configure` remains available as a
+hidden-prompt recovery option for controlled development, but the native
+`email-connect` flow is the normal path.
