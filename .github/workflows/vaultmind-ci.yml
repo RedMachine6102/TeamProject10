@@ -6,7 +6,6 @@ on:
       - "VaultMind-Next/**"
       - ".github/workflows/vaultmind-ci.yml"
   push:
-    branches: ["main"]
     paths:
       - "VaultMind-Next/**"
       - ".github/workflows/vaultmind-ci.yml"
