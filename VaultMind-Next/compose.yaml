@@ -1,0 +1,218 @@
+services:
+  proxy:
+    build: ./infra/caddy
+    image: vaultmind-proxy:latest
+    restart: unless-stopped
+    ports:
+      - "443:8443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8081/api/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  api:
+    build: .
+    image: vaultmind-next:latest
+    restart: unless-stopped
+    environment:
+      VAULTMIND_ENV: production
+      VAULTMIND_API_KEY: ${VAULTMIND_API_KEY:?set VAULTMIND_API_KEY}
+      VAULTMIND_DATABASE: /app/data/vaultmind-next.db
+      VAULTMIND_ROOT_KEY: ${VAULTMIND_ROOT_KEY:?set VAULTMIND_ROOT_KEY}
+      VAULTMIND_WEB_ROOT: /app/web
+      VAULTMIND_PUBLIC_URL: ${VAULTMIND_PUBLIC_URL:?set VAULTMIND_PUBLIC_URL}
+      VAULTMIND_SESSION_MINUTES: ${VAULTMIND_SESSION_MINUTES:-30}
+      VAULTMIND_GOOGLE_CLIENT_ID: ${VAULTMIND_GOOGLE_CLIENT_ID:-}
+      VAULTMIND_GOOGLE_CLIENT_SECRET: ${VAULTMIND_GOOGLE_CLIENT_SECRET:-}
+      VAULTMIND_MICROSOFT_CLIENT_ID: ${VAULTMIND_MICROSOFT_CLIENT_ID:-}
+      VAULTMIND_MICROSOFT_CLIENT_SECRET: ${VAULTMIND_MICROSOFT_CLIENT_SECRET:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - vaultmind_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health/ready')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  scheduler:
+    image: vaultmind-next:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: ["vaultmind-scheduler"]
+    environment:
+      VAULTMIND_DATABASE: /app/data/vaultmind-next.db
+      VAULTMIND_SCAN_SECONDS: ${VAULTMIND_SCAN_SECONDS:-60}
+    volumes:
+      - vaultmind_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; from pathlib import Path; from vaultmind_next.scheduler import heartbeat_is_fresh; raise SystemExit(0 if heartbeat_is_fresh(Path('/tmp/vaultmind-scheduler.heartbeat'), int(os.environ.get('VAULTMIND_SCAN_SECONDS', '60'))) else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  backup:
+    image: vaultmind-next:latest
+    pull_policy: never
+    restart: unless-stopped
+    command:
+      - vaultmind-backup
+      - schedule
+      - --database
+      - /app/data/vaultmind-next.db
+      - --directory
+      - /app/backups
+      - --interval-hours
+      - ${VAULTMIND_BACKUP_HOURS:-24}
+      - --retain
+      - ${VAULTMIND_BACKUP_RETAIN:-14}
+    environment:
+      VAULTMIND_BACKUP_KEY: ${VAULTMIND_BACKUP_KEY:-}
+      VAULTMIND_BACKUP_HOURS: ${VAULTMIND_BACKUP_HOURS:-24}
+    volumes:
+      - vaultmind_data:/app/data:ro
+      - vaultmind_backups:/app/backups
+    read_only: true
+    network_mode: none
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; from pathlib import Path; from vaultmind_next.backup import backup_is_fresh; raise SystemExit(0 if backup_is_fresh(Path('/app/backups'), int(os.environ.get('VAULTMIND_BACKUP_HOURS', '24'))) else 1)"]
+      interval: 1m
+      timeout: 10s
+      retries: 2
+
+  email-monitor:
+    image: vaultmind-next:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: ["vaultmind-email-monitor"]
+    environment:
+      VAULTMIND_DATABASE: /app/data/vaultmind-next.db
+      VAULTMIND_ROOT_KEY: ${VAULTMIND_ROOT_KEY:?set VAULTMIND_ROOT_KEY}
+      VAULTMIND_EMAIL_POLL_SECONDS: ${VAULTMIND_EMAIL_POLL_SECONDS:-300}
+      VAULTMIND_GOOGLE_CLIENT_ID: ${VAULTMIND_GOOGLE_CLIENT_ID:-}
+      VAULTMIND_GOOGLE_CLIENT_SECRET: ${VAULTMIND_GOOGLE_CLIENT_SECRET:-}
+      VAULTMIND_MICROSOFT_CLIENT_ID: ${VAULTMIND_MICROSOFT_CLIENT_ID:-}
+      VAULTMIND_MICROSOFT_CLIENT_SECRET: ${VAULTMIND_MICROSOFT_CLIENT_SECRET:-}
+    volumes:
+      - vaultmind_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; from pathlib import Path; from vaultmind_next.scheduler import heartbeat_is_fresh; raise SystemExit(0 if heartbeat_is_fresh(Path('/tmp/vaultmind-email-monitor.heartbeat'), int(os.environ.get('VAULTMIND_EMAIL_POLL_SECONDS', '300'))) else 1)"]
+      interval: 1m
+      timeout: 5s
+      retries: 3
+
+  planner:
+    profiles: ["ai"]
+    image: vaultmind-next:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: ["vaultmind-planner"]
+    environment:
+      VAULTMIND_DATABASE: /app/data/vaultmind-next.db
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VAULTMIND_AI_MODEL: ${VAULTMIND_AI_MODEL:-gpt-5.4-mini}
+      VAULTMIND_AI_POLL_SECONDS: ${VAULTMIND_AI_POLL_SECONDS:-300}
+    volumes:
+      - vaultmind_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  restore:
+    profiles: ["restore"]
+    image: vaultmind-next:latest
+    pull_policy: never
+    command: ["vaultmind-backup", "--help"]
+    environment:
+      VAULTMIND_BACKUP_KEY: ${VAULTMIND_BACKUP_KEY:-}
+    volumes:
+      - vaultmind_data:/restore-data
+      - vaultmind_backups:/app/backups:ro
+    read_only: true
+    network_mode: none
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  demo-provider:
+    profiles: ["demo"]
+    image: vaultmind-next:latest
+    pull_policy: never
+    command: ["uvicorn", "vaultmind_demo_provider.main:app", "--host", "0.0.0.0", "--port", "8090", "--no-server-header"]
+    environment:
+      VAULTMIND_DEMO_USERNAME: ${VAULTMIND_DEMO_USERNAME:-}
+      VAULTMIND_DEMO_PASSWORD: ${VAULTMIND_DEMO_PASSWORD:-}
+    ports:
+      - "127.0.0.1:8090:8090"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:
+  vaultmind_data:
+  vaultmind_backups:

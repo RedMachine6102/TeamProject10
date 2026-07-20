@@ -3,6 +3,18 @@
 > Sprint 1 defects D-001…D-004 and Risks 3–4 from the test plan are resolved.
 > See `CHANGELOG.md` for the defect-to-fix mapping.
 
+## Hardened service build
+
+[`VaultMind-Next/`](VaultMind-Next/) contains the separately isolated service
+build: a zero-knowledge web vault, passkey sessions, signed trusted rotation
+agent, 30/60/90-day scheduler, metadata-only email security monitoring,
+encrypted backups, internal HTTPS ingress, dependency locks, SPDX inventory,
+and blocking container-security gates.
+
+The original course prototype remains at the repository root. The newer service
+does not replace it and has its own architecture, tests, deployment files, and
+readiness documentation.
+
 
 Intelligent password management prototype implementing the Sprint 2 requirements from the design document. The application is a hybrid **C++ / Python** build:
 

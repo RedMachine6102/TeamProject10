@@ -1,0 +1,9 @@
+# Test-only packages for the Python 3.13 CI environment.
+certifi==2026.6.17
+httpcore==1.0.9
+httpx==0.28.1
+iniconfig==2.3.0
+packaging==26.2
+pluggy==1.6.0
+Pygments==2.20.0
+pytest==9.1.1
